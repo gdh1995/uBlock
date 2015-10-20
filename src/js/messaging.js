@@ -1324,48 +1324,6 @@ vAPI.messaging.listen('logger-ui.js', onMessage);
 /******************************************************************************/
 /******************************************************************************/
 
-// subscriber.js
-
-(function() {
-
-'use strict';
-
-/******************************************************************************/
-
-var onMessage = function(request, sender, callback) {
-    // Async
-    switch ( request.what ) {
-        default:
-            break;
-    }
-
-    // Sync
-    var response;
-
-    switch ( request.what ) {
-    case 'subscriberData':
-        response = {
-            confirmStr: vAPI.i18n('subscriberConfirm'),
-            externalLists: µBlock.userSettings.externalLists
-        };
-        break;
-
-    default:
-        return vAPI.messaging.UNHANDLED;
-    }
-
-    callback(response);
-};
-
-vAPI.messaging.listen('subscriber.js', onMessage);
-
-/******************************************************************************/
-
-})();
-
-/******************************************************************************/
-/******************************************************************************/
-
 // document-blocked.js
 
 (function() {
