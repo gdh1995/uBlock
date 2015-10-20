@@ -913,41 +913,6 @@ var uBlockCollapser = (function() {
 /******************************************************************************/
 /******************************************************************************/
 
-// To send mouse coordinates to context menu handler, as the chrome API fails
-// to provide the mouse position to context menu listeners.
-// This could be inserted in its own content script, but it's so simple that
-// I feel it's not worth the overhead.
-
-// Ref.: https://developer.mozilla.org/en-US/docs/Web/Events/contextmenu
-
-(function() {
-    if ( window !== window.top ) {
-        return;
-    }
-    var onMouseClick = function(ev) {
-        var elem = ev.target;
-        while ( elem !== null && elem.localName !== 'a' ) {
-            elem = elem.parentElement;
-        }
-        messager.send({
-            what: 'mouseClick',
-            x: ev.clientX,
-            y: ev.clientY,
-            url: elem !== null ? elem.href : ''
-        });
-    };
-
-    window.addEventListener('mousedown', onMouseClick, true);
-
-    // https://github.com/gorhill/uMatrix/issues/144
-    vAPI.shutdown.add(function() {
-        document.removeEventListener('mousedown', onMouseClick, true);
-    });
-})();
-
-/******************************************************************************/
-/******************************************************************************/
-
 })();
 
 /******************************************************************************/

@@ -312,32 +312,6 @@ return r;\
     };
     document.addEventListener("DOMContentLoaded", firstMutation, true);
 
-    var onContextMenu = function(e) {
-        var target = e.target;
-        var tagName = target.tagName.toLowerCase();
-        var details = {
-            tagName: tagName,
-            pageUrl: location.href,
-            insideFrame: window !== window.top
-        };
-        details.editable = (tagName === "textarea" || tagName === "input");
-        if(target.hasOwnProperty("checked")) {
-            details.checked = target.checked;
-        }
-        if(tagName === "a") {
-            details.linkUrl = target.href;
-        }
-        if(target.hasOwnProperty("src")) {
-            details.srcUrl = target.src;
-            if(tagName === "img") {
-                details.mediaType = "image";
-            } else if(tagName === "video" || tagName === "audio") {
-                details.mediaType = tagName;
-            }
-        }
-        safari.self.tab.setContextMenuEventUserInfo(e, details);
-    };
-    self.addEventListener("contextmenu", onContextMenu, true);
 })(this);
 
 /******************************************************************************/
