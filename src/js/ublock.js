@@ -268,9 +268,6 @@ var matchWhitelistDirective = function(url, hostname, directive) {
             this.cosmeticFilteringEngine.removeFromSelectorCache('*', 'net');
         }
         break;
-    case 'contextMenuEnabled':
-        this.contextMenu.toggle(value);
-        break;
     case 'experimentalEnabled':
         break;
     case 'hyperlinkAuditingDisabled':

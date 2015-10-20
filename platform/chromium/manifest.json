@@ -45,7 +45,6 @@
         "page": "options_ui.html"
     },
     "permissions": [
-        "contextMenus",
         "privacy",
         "storage",
         "tabs",

@@ -174,12 +174,6 @@ var onUserSettingsReceived = function(details) {
             changeUserSettings('showIconBadge', this.checked);
         });
 
-    uDom('#context-menu-enabled')
-        .prop('checked', details.contextMenuEnabled === true)
-        .on('change', function(){
-            changeUserSettings('contextMenuEnabled', this.checked);
-        });
-
     uDom('#color-blind-friendly')
         .prop('checked', details.colorBlindFriendly === true)
         .on('change', function(){

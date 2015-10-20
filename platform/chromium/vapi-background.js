@@ -922,22 +922,6 @@ vAPI.net.registerListeners = function() {
 /******************************************************************************/
 /******************************************************************************/
 
-vAPI.contextMenu = {
-    create: function(details, callback) {
-        this.menuId = details.id;
-        this.callback = callback;
-        chrome.contextMenus.create(details);
-        chrome.contextMenus.onClicked.addListener(this.callback);
-    },
-    remove: function() {
-        chrome.contextMenus.onClicked.removeListener(this.callback);
-        chrome.contextMenus.remove(this.menuId);
-    }
-};
-
-/******************************************************************************/
-/******************************************************************************/
-
 vAPI.lastError = function() {
     return chrome.runtime.lastError;
 };

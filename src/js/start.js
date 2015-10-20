@@ -163,7 +163,6 @@ var onUserSettingsReady = function(fetched) {
     // Disabling local mirroring for the time being
     userSettings.experimentalEnabled = false;
 
-    µb.contextMenu.toggle(userSettings.contextMenuEnabled);
     vAPI.browserSettings.set({
         'hyperlinkAuditing': !userSettings.hyperlinkAuditingDisabled,
         'prefetching': !userSettings.prefetchingDisabled,
