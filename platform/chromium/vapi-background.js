@@ -37,6 +37,7 @@ var chrome = self.chrome;
 var manifest = chrome.runtime.getManifest();
 
 vAPI.chrome = true;
+vAPI.opera = /\bOPR\/[\d.]+\b/.test(self.navigator.appVersion);
 
 var noopFunc = function(){};
 
@@ -75,6 +76,12 @@ vAPI.storage = chrome.storage.local;
 
 vAPI.browserSettings = {
     set: function(details) {
+        // https://github.com/gorhill/uBlock/issues/875
+        // Must not leave `lastError` unchecked.
+        var callback = function() {
+            void chrome.runtime.lastError;
+        };
+
         for ( var setting in details ) {
             if ( details.hasOwnProperty(setting) === false ) {
                 continue;
@@ -85,7 +92,7 @@ vAPI.browserSettings = {
                     chrome.privacy.network.networkPredictionEnabled.set({
                         value: !!details[setting],
                         scope: 'regular'
-                    });
+                    }, callback);
                 } catch(ex) {
                     console.error(ex);
                 }
@@ -96,7 +103,7 @@ vAPI.browserSettings = {
                     chrome.privacy.websites.hyperlinkAuditingEnabled.set({
                         value: !!details[setting],
                         scope: 'regular'
-                    });
+                    }, callback);
                 } catch(ex) {
                     console.error(ex);
                 }
@@ -108,7 +115,7 @@ vAPI.browserSettings = {
                         chrome.privacy.network.webRTCMultipleRoutesEnabled.set({
                             value: !!details[setting],
                             scope: 'regular'
-                        });
+                        }, callback);
                     } catch(ex) {
                         console.error(ex);
                     }
@@ -987,6 +994,38 @@ vAPI.punycodeHostname = function(hostname) {
 
 vAPI.punycodeURL = function(url) {
     return url;
+};
+
+/******************************************************************************/
+/******************************************************************************/
+
+// https://github.com/gorhill/uBlock/issues/531
+// Storage area dedicated to admin settings. Read-only.
+
+// https://github.com/gorhill/uBlock/commit/43a5ed735b95a575a9339b6e71a1fcb27a99663b#commitcomment-13965030
+// Not all Chromium-based browsers support managed storage. Merely testing or
+// exception handling in this case does NOT work: I don't know why. The
+// extension on Opera ends up in a non-sensical state, whereas vAPI become
+// undefined out of nowhere. So only solution left is to test explicitly for
+// Opera.
+
+vAPI.adminStorage = {
+    getItem: (function() {
+        if ( vAPI.opera ) {
+            return function(key, callback) {
+                callback();
+            };
+        }
+        return function(key, callback) {
+            try {
+                chrome.storage.managed.get(key, function(store) {
+                    callback(store[key] || undefined);
+                });
+            } catch (ex) {
+                callback();
+            }
+        };
+    })()
 };
 
 /******************************************************************************/
