@@ -32,8 +32,8 @@
     "description":"appears as tab name in dashboard"
   },
   "statsPageName":{
-    "message":"uBlock₀ — Tinklo užklausų žurnalas",
-    "description":"Title for the network request log window"
+    "message":"uBlock₀ — Žurnalas",
+    "description":"Title for the logger window"
   },
   "aboutPageName":{
     "message":"Apie",
@@ -72,8 +72,8 @@
     "description":"English: Enter element picker mode"
   },
   "popupTipLog":{
-    "message":"Eiti į užklausų žurnalą",
-    "description":"English: Go to request log"
+    "message":"Atverti žurnalą",
+    "description":"Tooltip used for the logger icon in the panel"
   },
   "popupTipNoPopups":{
     "message":"Perjungti visų iškylančiųjų langų blokavimą šiame puslapyje",
@@ -90,6 +90,22 @@
   "popupTipNoRemoteFonts":{
     "message":"Perjungti nuotolinių šriftų blokavimą šiame puslapyje",
     "description":"English: Toggle the blocking of remote fonts for this site"
+  },
+  "popupTipGlobalRules":{
+    "message":"Globalios taisyklės: ši skiltis skirta visiems puslapiams taikomoms taisyklėms.",
+    "description":"Tooltip when hovering the top-most cell of the global-rules column."
+  },
+  "popupTipLocalRules":{
+    "message":"Vietinės taisyklės: ši skiltis skirta dabartiniam puslapiui taikomoms taisyklėms.\nVietinės taisyklės nustelbia globalias.",
+    "description":"Tooltip when hovering the top-most cell of the local-rules column."
+  },
+  "popupTipSaveRules":{
+    "message":"Spauskite pakeitimams padaryti pastoviais.",
+    "description":"Tooltip when hovering over the padlock in the dynamic filtering pane."
+  },
+  "popupTipRevertRules":{
+    "message":"Spauskite pakeitimams atstatyti.",
+    "description":"Tooltip when hovering over the eraser in the dynamic filtering pane."
   },
   "popupAnyRulePrompt":{
     "message":"visi",
@@ -166,6 +182,10 @@
   "settingsIconBadgePrompt":{
     "message":"Rodyti blokuotų užklausų skaičių piktogramoje",
     "description":"English: Show the number of blocked requests on the icon"
+  },
+  "settingsTooltipsPrompt":{
+    "message":"Išjungti paaiškinimus",
+    "description":"A checkbox in the Settings pane"
   },
   "settingsContextMenuPrompt":{
     "message":"Kur tinka, naudoti kontekstinį meniu",
@@ -573,7 +593,7 @@
   },
   "docblockedNoParamsPrompt":{
     "message":"be parametrų",
-    "description":"label to be used for the parameter-less URL"
+    "description":"label to be used for the parameter-less URL: https:\/\/cloud.githubusercontent.com\/assets\/585534\/9832014\/bfb1b8f0-593b-11e5-8a27-fba472a5529a.png"
   },
   "docblockedFoundIn":{
     "message":"Rasta:",

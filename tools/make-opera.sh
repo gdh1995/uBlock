@@ -10,7 +10,6 @@ rm -r $DES
 mkdir -p $DES
 
 cp -R assets $DES/
-./tools/fix-3p-assets.sh $DES
 rm $DES/assets/*.sh
 cp -R src/css $DES/
 cp -R src/img $DES/
@@ -19,7 +18,8 @@ cp -R src/lib $DES/
 cp -R src/_locales $DES/
 
 cp src/*.html $DES/
-cp platform/chromium/*.js $DES/js/
+cp platform/chromium/*.html $DES/
+cp platform/chromium/*.js   $DES/js/
 cp platform/chromium/*.json $DES/
 cp -R platform/chromium/img $DES/
 

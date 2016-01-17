@@ -172,6 +172,7 @@ var filterDecompiler = (function() {
          6: 'subdocument',
          7: 'font',
          8: 'other',
+        11: 'popunder',
         12: 'document',
         13: 'elemhide',
         14: 'inline-script',
@@ -282,8 +283,10 @@ var filterDecompiler = (function() {
         return filter;
     };
 
-    var reEscape = /[.+?^${}()|[\]\\]/g;
+    var reEscapeHostname = /[.[\]]/g;
+    var reEscape = /[.+?${}()|[\]\\]/g;
     var reWildcards = /\*+/g;
+    var reSeparator = /\^/g;
 
     var toRegex = function(compiled) {
         var vfields = compiled.split('\v');
@@ -293,7 +296,8 @@ var filterDecompiler = (function() {
 
         switch ( fid ) {
         case '.':
-            reStr = vfields[2].replace(reEscape, '\\$&');
+            reStr = vfields[2].replace(reEscapeHostname, '\\$&') +
+                    '(?:[^%.0-9a-z_-]|$)';
             break;
         case 'a':
         case 'ah':
@@ -301,6 +305,10 @@ var filterDecompiler = (function() {
         case '0ah':
         case '1a':
         case '1ah':
+        case '|a':
+        case '|ah':
+        case 'a|':
+        case 'a|h':
         case '_':
         case '_h':
         case '||a':
@@ -308,20 +316,9 @@ var filterDecompiler = (function() {
         case '||_':
         case '||_h':
             reStr = tfields[0]
-                        .replace(reEscape, '\\$&')
-                        .replace(reWildcards, '.*');
-            break;
-        case '|a':
-        case '|ah':
-            reStr = '^' + tfields[0].
-                        replace(reEscape, '\\$&')
-                        .replace(reWildcards, '.*');
-            break;
-        case 'a|':
-        case 'a|h':
-            reStr = tfields[0]
-                        .replace(reEscape, '\\$&')
-                        .replace(reWildcards, '.*') + '$';
+                    .replace(reEscape, '\\$&')
+                    .replace(reWildcards, '.*')
+                    .replace(reSeparator, '(?:[^%.0-9a-z_-]|$)');
             break;
         case '//':
         case '//h':
@@ -329,6 +326,14 @@ var filterDecompiler = (function() {
             break;
         default:
             break;
+        }
+
+        // Anchored?
+        var s = fid.slice(0, 2);
+        if ( s === '|a' ) {
+            reStr = '^' + reStr;
+        } else if ( s === 'a|' ) {
+            reStr += '$';
         }
 
         if ( reStr === undefined) {
@@ -482,6 +487,9 @@ var renderNetLogEntry = function(tr, entry) {
     } else if ( filteringOp === 'n' ) {
         trcl.add('nooped');
         td.textContent = '**';
+    } else if ( filteringOp === 'r' ) {
+        trcl.add('redirected');
+        td.textContent = '<<';
     } else {
         td.textContent = '';
     }
@@ -512,6 +520,7 @@ var renderLogEntry = function(entry) {
 
     case 'cosmetic':
     case 'net':
+    case 'redirect':
         tr = createRow('1111');
         renderNetLogEntry(tr, entry);
         break;

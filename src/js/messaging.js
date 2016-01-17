@@ -276,7 +276,7 @@ var getFirewallRules = function(srcHostname, desHostnames) {
 /******************************************************************************/
 
 var popupDataFromTabId = function(tabId, tabTitle) {
-    var tabContext = µb.tabContextManager.lookup(tabId);
+    var tabContext = µb.tabContextManager.mustLookup(tabId);
     var r = {
         advancedUserEnabled: µb.userSettings.advancedUserEnabled,
         appName: vAPI.app.name,
@@ -294,8 +294,10 @@ var popupDataFromTabId = function(tabId, tabTitle) {
         pageDomain: tabContext.rootDomain,
         pageAllowedRequestCount: 0,
         pageBlockedRequestCount: 0,
+        popupBlockedCount: 0,
         tabId: tabId,
-        tabTitle: tabTitle
+        tabTitle: tabTitle,
+        tooltipsDisabled: µb.userSettings.tooltipsDisabled
     };
 
     var pageStore = µb.pageStoreFromTabId(tabId);
@@ -312,6 +314,7 @@ var popupDataFromTabId = function(tabId, tabTitle) {
         r.noCosmeticFiltering = µb.hnSwitches.evaluateZ('no-cosmetic-filtering', tabContext.rootHostname);
         r.noRemoteFonts = µb.hnSwitches.evaluateZ('no-remote-fonts', tabContext.rootHostname);
         r.remoteFontCount = pageStore.remoteFontCount;
+        r.popupBlockedCount = pageStore.popupBlockedCount;
     } else {
         r.hostnameDict = {};
         r.firewallRules = getFirewallRules();
@@ -469,8 +472,11 @@ var onMessage = function(request, sender, callback) {
 
     switch ( request.what ) {
     case 'retrieveDomainCosmeticSelectors':
-        if ( pageStore && pageStore.getSpecificCosmeticFilteringSwitch() ) {
+        if ( pageStore && pageStore.getNetFilteringSwitch() ) {
             response = µb.cosmeticFilteringEngine.retrieveDomainSelectors(request);
+            if ( response && response.skipCosmeticFiltering !== true ) {
+                response.skipCosmeticFiltering = !pageStore.getSpecificCosmeticFilteringSwitch();
+            }
         }
         break;
 
@@ -521,22 +527,34 @@ var filterRequests = function(pageStore, details) {
 
     //console.debug('messaging.js/contentscript-end.js: processing %d requests', requests.length);
 
-    var µburi = µb.URI;
-    var isBlockResult = µb.isBlockResult;
+    var hostnameFromURI = µb.URI.hostnameFromURI;
+    var redirectEngine = µb.redirectEngine;
+    var punycodeURL = vAPI.punycodeURL;
 
     // Create evaluation context
     var context = pageStore.createContextFromFrameHostname(details.pageHostname);
 
-    var request;
+    var request, r;
     var i = requests.length;
     while ( i-- ) {
         request = requests[i];
-        context.requestURL = vAPI.punycodeURL(request.url);
-        context.requestHostname = µburi.hostnameFromURI(request.url);
-        context.requestType = tagNameToRequestTypeMap[request.tagName];
-        if ( isBlockResult(pageStore.filterRequest(context)) ) {
-            request.collapse = true;
+        context.requestURL = punycodeURL(request.url);
+        // https://github.com/gorhill/uBlock/issues/978
+        // Ignore invalid URLs: these would not occur on the HTTP
+        // observer side.
+        if ( (context.requestHostname = hostnameFromURI(request.url)) === '' ) {
+            continue;
         }
+        context.requestType = tagNameToRequestTypeMap[request.tagName];
+        r = pageStore.filterRequest(context);
+        if ( typeof r !== 'string' || r.charAt(1) !== 'b' ) {
+            continue;
+        }
+        // Redirected? (We do not hide redirected resources.)
+        if ( redirectEngine.matches(context) ) {
+            continue;
+        }
+        request.collapse = true;
     }
     return requests;
 };
@@ -850,10 +868,10 @@ var onMessage = function(request, sender, callback) {
     // Async
     switch ( request.what ) {
     case 'readUserFilters':
-        return µb.assets.get(µb.userFiltersPath, callback);
+        return µb.loadUserFilters(callback);
 
     case 'writeUserFilters':
-        return µb.assets.put(µb.userFiltersPath, request.content, callback);
+        return µb.saveUserFilters(request.content, callback);
 
     default:
         break;
@@ -1125,7 +1143,7 @@ var restoreUserData = function(request) {
     var onAllRemoved = function() {
         // Be sure to adjust `countdown` if adding/removing anything below
         µb.keyvalSetOne('version', userData.version);
-        µBlock.saveLocalSettings(true);
+        µBlock.saveLocalSettings();
         vAPI.storage.set(userData.userSettings, onCountdown);
         µb.keyvalSetOne('remoteBlacklists', userData.filterLists, onCountdown);
         µb.keyvalSetOne('netWhitelist', userData.netWhitelist || '', onCountdown);
@@ -1161,7 +1179,7 @@ var resetUserData = function() {
     vAPI.storage.clear();
 
     // Keep global counts, people can become quite attached to numbers
-    µb.saveLocalSettings(true);
+    µb.saveLocalSettings();
 
     vAPI.app.restart();
 };
@@ -1271,7 +1289,7 @@ var onMessage = function(request, sender, callback) {
             if ( pageStore === null ) {
                 continue;
             }
-            if ( pageStore.rawURL.lastIndexOf(loggerURL, 0) === 0 ) {
+            if ( pageStore.rawURL.startsWith(loggerURL) ) {
                 continue;
             }
             tabIds[tabId] = pageStore.title;

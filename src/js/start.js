@@ -76,6 +76,8 @@ var onAllReady = function() {
     //quickProfiler.stop(0);
 
     vAPI.onLoadAllCompleted();
+
+    µb.firstInstall = false;
 };
 
 /******************************************************************************/
@@ -125,9 +127,13 @@ var onSelfieReady = function(selfie) {
     if ( publicSuffixList.fromSelfie(selfie.publicSuffixList) !== true ) {
         return false;
     }
-    //console.log('start.js/onSelfieReady: selfie looks good');
+    if ( selfie.redirectEngine === undefined ) {
+        return false;
+    }
+
     µb.remoteBlacklists = selfie.filterLists;
     µb.staticNetFilteringEngine.fromSelfie(selfie.staticNetFilteringEngine);
+    µb.redirectEngine.fromSelfie(selfie.redirectEngine);
     µb.cosmeticFilteringEngine.fromSelfie(selfie.cosmeticFilteringEngine);
     return true;
 };
@@ -195,7 +201,7 @@ var onSystemSettingsReady = function(fetched) {
     }
     if ( mustSaveSystemSettings ) {
         fetched.selfie = null;
-        µb.destroySelfie();
+        µb.selfieManager.destroy();
         vAPI.storage.set(µb.systemSettings, µb.noopFunc);
     }
 };
@@ -203,6 +209,9 @@ var onSystemSettingsReady = function(fetched) {
 /******************************************************************************/
 
 var onFirstFetchReady = function(fetched) {
+    // https://github.com/gorhill/uBlock/issues/747
+    µb.firstInstall = fetched.version === '0.0.0.0';
+
     // Order is important -- do not change:
     onSystemSettingsReady(fetched);
     fromFetch(µb.localSettings, fetched);
@@ -245,34 +254,35 @@ var fromFetch = function(to, fetched) {
 
 /******************************************************************************/
 
-return function() {
+var onAdminSettingsRestored = function() {
+    // Forbid remote fetching of assets
+    µb.assets.remoteFetchBarrier += 1;
 
-    var onAdminSettingsRestored = function() {
-        // Forbid remote fetching of assets
-        µb.assets.remoteFetchBarrier += 1;
-
-        var fetchableProps = {
-            'compiledMagic': '',
-            'dynamicFilteringString': '',
-            'urlFilteringString': '',
-            'hostnameSwitchesString': '',
-            'lastRestoreFile': '',
-            'lastRestoreTime': 0,
-            'lastBackupFile': '',
-            'lastBackupTime': 0,
-            'netWhitelist': '',
-            'selfie': null,
-            'selfieMagic': '',
-            'version': '0.0.0.0'
-        };
-
-        toFetch(µb.localSettings, fetchableProps);
-        toFetch(µb.userSettings, fetchableProps);
-        toFetch(µb.restoreBackupSettings, fetchableProps);
-
-        vAPI.storage.get(fetchableProps, onFirstFetchReady);
+    var fetchableProps = {
+        'compiledMagic': '',
+        'dynamicFilteringString': 'behind-the-scene * 3p noop\nbehind-the-scene * 3p-frame noop',
+        'urlFilteringString': '',
+        'hostnameSwitchesString': '',
+        'lastRestoreFile': '',
+        'lastRestoreTime': 0,
+        'lastBackupFile': '',
+        'lastBackupTime': 0,
+        'netWhitelist': '',
+        'selfie': null,
+        'selfieMagic': '',
+        'version': '0.0.0.0'
     };
 
+    toFetch(µb.localSettings, fetchableProps);
+    toFetch(µb.userSettings, fetchableProps);
+    toFetch(µb.restoreBackupSettings, fetchableProps);
+
+    vAPI.storage.get(fetchableProps, onFirstFetchReady);
+};
+
+/******************************************************************************/
+
+return function() {
     // https://github.com/gorhill/uBlock/issues/531
     µb.restoreAdminSettings(onAdminSettingsRestored);
 };

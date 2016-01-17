@@ -19,8 +19,6 @@
     Home: https://github.com/gorhill/uBlock
 */
 
-/* global self, µBlock */
-
 // For background page
 
 /******************************************************************************/
@@ -74,6 +72,71 @@ vAPI.storage = chrome.storage.local;
 // API threw an exception.
 
 vAPI.browserSettings = {
+    webRTCSupported: undefined,
+
+    // https://github.com/gorhill/uBlock/issues/533
+    // We must first check wether this Chromium-based browser was compiled
+    // with WebRTC support. To do this, we use an iframe, this way the
+    // empty RTCPeerConnection object we create to test for support will
+    // be properly garbage collected. This prevents issues such as
+    // a computer unable to enter into sleep mode, as reported in the
+    // Chrome store:
+    // https://github.com/gorhill/uBlock/issues/533#issuecomment-167931681
+    setWebrtcIPAddress: function(setting) {
+        // We don't know yet whether this browser supports WebRTC: find out.
+        if ( this.webRTCSupported === undefined ) {
+            this.webRTCSupported = { setting: setting };
+            var iframe = document.createElement('iframe');
+            var me = this;
+            var messageHandler = function(ev) {
+                if ( ev.origin !== self.location.origin ) {
+                    return;
+                }
+                window.removeEventListener('message', messageHandler);
+                var setting = me.webRTCSupported.setting;
+                me.webRTCSupported = ev.data === 'webRTCSupported';
+                me.setWebrtcIPAddress(setting);
+                iframe.parentNode.removeChild(iframe);
+                iframe = null;
+            };
+            window.addEventListener('message', messageHandler);
+            iframe.src = 'is-webrtc-supported.html';
+            document.body.appendChild(iframe);
+            return;
+        }
+
+        // We are waiting for a response from our iframe. This makes the code
+        // safe to re-entrancy.
+        if ( typeof this.webRTCSupported === 'object' ) {
+            this.webRTCSupported.setting = setting;
+            return;
+        }
+
+        // https://github.com/gorhill/uBlock/issues/533
+        // WebRTC not supported: `webRTCMultipleRoutesEnabled` can NOT be
+        // safely accessed. Accessing the property will cause full browser
+        // crash.
+        if ( this.webRTCSupported !== true ) {
+            return;
+        }
+
+        // Older version of Chromium do not support this setting.
+        if ( typeof chrome.privacy.network.webRTCMultipleRoutesEnabled !== 'object' ) {
+            return;
+        }
+
+        try {
+            chrome.privacy.network.webRTCMultipleRoutesEnabled.set({
+                value: !!setting,
+                scope: 'regular'
+            }, function() {
+                void chrome.runtime.lastError;
+            });
+        } catch(ex) {
+            console.error(ex);
+        }
+    },
+
     set: function(details) {
         // https://github.com/gorhill/uBlock/issues/875
         // Must not leave `lastError` unchecked.
@@ -109,16 +172,7 @@ vAPI.browserSettings = {
                 break;
 
             case 'webrtcIPAddress':
-                if ( typeof chrome.privacy.network.webRTCMultipleRoutesEnabled === 'object' ) {
-                    try {
-                        chrome.privacy.network.webRTCMultipleRoutesEnabled.set({
-                            value: !!details[setting],
-                            scope: 'regular'
-                        }, callback);
-                    } catch(ex) {
-                        console.error(ex);
-                    }
-                }
+                this.setWebrtcIPAddress(details[setting]);
                 break;
 
             default:
@@ -157,7 +211,6 @@ var toChromiumTabId = function(tabId) {
 
 vAPI.tabs.registerListeners = function() {
     var onNavigationClient = this.onNavigation || noopFunc;
-    var onPopupClient = this.onPopup || noopFunc;
     var onUpdatedClient = this.onUpdated || noopFunc;
 
     // https://developer.chrome.com/extensions/webNavigation
@@ -166,58 +219,6 @@ vAPI.tabs.registerListeners = function() {
     //  onCommitted ->
     //  onDOMContentLoaded ->
     //  onCompleted
-
-    var popupCandidates = Object.create(null);
-
-    var PopupCandidate = function(details) {
-        this.targetTabId = details.tabId.toString();
-        this.openerTabId = details.sourceTabId.toString();
-        this.targetURL = details.url;
-        this.selfDestructionTimer = null;
-    };
-
-    PopupCandidate.prototype.selfDestruct = function() {
-        if ( this.selfDestructionTimer !== null ) {
-            clearTimeout(this.selfDestructionTimer);
-        }
-        delete popupCandidates[this.targetTabId];
-    };
-
-    PopupCandidate.prototype.launchSelfDestruction = function() {
-        if ( this.selfDestructionTimer !== null ) {
-            clearTimeout(this.selfDestructionTimer);
-        }
-        this.selfDestructionTimer = setTimeout(this.selfDestruct.bind(this), 10000);
-    };
-
-    var popupCandidateCreate = function(details) {
-        var popup = popupCandidates[details.tabId];
-        // This really should not happen...
-        if ( popup !== undefined ) {
-            return;
-        }
-        return (popupCandidates[details.tabId] = new PopupCandidate(details));
-    };
-
-    var popupCandidateTest = function(details) {
-        var popup = popupCandidates[details.tabId];
-        if ( popup === undefined ) {
-            return;
-        }
-        popup.targetURL = details.url;
-        if ( onPopupClient(popup) !== true ) {
-            return;
-        }
-        popup.selfDestruct();
-        return true;
-    };
-
-    var popupCandidateDestroy = function(details) {
-        var popup = popupCandidates[details.tabId];
-        if ( popup instanceof PopupCandidate ) {
-            popup.launchSelfDestruction();
-        }
-    };
 
     // The chrome.webRequest.onBeforeRequest() won't be called for everything
     // else than `http`/`https`. Thus, in such case, we will bind the tab as
@@ -233,22 +234,18 @@ vAPI.tabs.registerListeners = function() {
             details.frameId = 0;
             onNavigationClient(details);
         }
-        popupCandidateCreate(details);
-        popupCandidateTest(details);
+        if ( typeof vAPI.tabs.onPopupCreated === 'function' ) {
+            vAPI.tabs.onPopupCreated(details.tabId.toString(), details.sourceTabId.toString());
+        }
     };
 
     var onBeforeNavigate = function(details) {
         if ( details.frameId !== 0 ) {
             return;
         }
-        //console.debug('onBeforeNavigate: popup candidate tab id %d = "%s"', details.tabId, details.url);
-        popupCandidateTest(details);
     };
 
     var onUpdated = function(tabId, changeInfo, tab) {
-        if ( changeInfo.url && popupCandidateTest({ tabId: tabId, url: changeInfo.url }) ) {
-            return;
-        }
         onUpdatedClient(tabId, changeInfo, tab);
     };
 
@@ -257,11 +254,6 @@ vAPI.tabs.registerListeners = function() {
             return;
         }
         onNavigationClient(details);
-        //console.debug('onCommitted: popup candidate tab id %d = "%s"', details.tabId, details.url);
-        if ( popupCandidateTest(details) === true ) {
-            return;
-        }
-        popupCandidateDestroy(details);
     };
 
     chrome.webNavigation.onCreatedNavigationTarget.addListener(onCreatedNavigationTarget);
@@ -866,7 +858,7 @@ vAPI.net.registerListeners = function() {
         // something else. Test case for "unfriendly" font URLs:
         //   https://www.google.com/fonts
         if ( details.type === 'object' ) {
-            if ( headerValue(details.responseHeaders, 'content-type').lastIndexOf('font/', 0) === 0 ) {
+            if ( headerValue(details.responseHeaders, 'content-type').startsWith('font/') ) {
                 details.type = 'font';
                 var r = onBeforeRequestClient(details);
                 if ( typeof r === 'object' && r.cancel === true ) {

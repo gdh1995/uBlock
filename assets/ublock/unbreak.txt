@@ -3,28 +3,30 @@
 
 # https://twitter.com/JarkkoRytkonen/status/540052376015888385
 # https://github.com/chrisaljoudi/uBlock/issues/119
-# https://github.com/chrisaljoudi/uBlock/issues/822
 # https://github.com/chrisaljoudi/uBlock/issues/940
 # To counter `google-analytics.com` in Peter Lowe's list
-@@||google-analytics.com^$domain=avianca.com|jackbox.tv|musixmatch.com|bikstok.sonymusicshop.dk
+@@||google-analytics.com^$domain=avianca.com|jackbox.tv|newegg.com|bikstok.sonymusicshop.dk
 
 # From Chrome store: "Go to site http://www.vd.nl/ ... links from dropdown top menu do not work"
-# https://github.com/gorhill/uBlock/issues/349 : "conflicting with reddit's gold popup box"
-# https://github.com/chrisaljoudi/uBlock/issues/1546
 # To counter Dan Pollock's, hpHosts, MVPS, Peter Lowe's
-@@||google-analytics.com/analytics.js$script,domain=reddit.com|trello.com|www.vd.nl
+@@||google-analytics.com/analytics.js$script,domain=burodecredito.com.mx|vd.nl
 
-# https://github.com/chrisaljoudi/uBlock/issues/20
-# https://github.com/chrisaljoudi/uBlock/issues/650
-# https://github.com/chrisaljoudi/uBlock/issues/821
-# => blocking counterpart in Peter Lowe's Ad Server
-@@||google-analytics.com/ga.js^$script,domain=onlinetv.ru|xda-developers.com|zie.nl
+# https://github.com/gorhill/uBlock/issues/1164
+# GA plugins are pulled if and only if `analytics.js` was already allowed in
+# the first place: it is thus safe to create a global exception filter for
+# all GA plugins.
+@@||google-analytics.com/plugins/$script
+
+# https://github.com/gorhill/uBlock/issues/1020
+@@||www.google-analytics.com/ga.js$script,domain=santander.com.mx|tv2.no
 
 # https://github.com/gorhill/uBlock/issues/939
 @@||google-analytics.com/urchin.js$script,domain=live.euroleague.net
 
 # https://github.com/chrisaljoudi/uBlock/issues/63
 @@||adf.ly^$~third-party
+# https://github.com/gorhill/uBlock/issues/1131
+@@||adf.ly^$domain=j.gs
 
 # https://github.com/chrisaljoudi/uBlock/issues/69
 @@||widget-cdn.rpxnow.com^$domain=foxnews.com,script
@@ -95,10 +97,6 @@
 # https://github.com/chrisaljoudi/uBlock/issues/374
 # To counter `2mdn.net` in Peter Lowe's, `s0.2mdn.net` in hpHosts
 @@||s0.2mdn.net/instream/*$object,script,domain=wsmv.com
-
-# Videos broken on weather.com
-# To counter `www.googletagservices.com` in MVPS, hpHosts, Dan Pollock's
-@@||www.googletagservices.com/tag/js/gpt.js^$script,domain=weather.com
 
 # https://github.com/chrisaljoudi/uBlock/issues/409
 @@||c.speedtest.net^$~third-party
@@ -243,3 +241,16 @@ marketwatch.com#@#.advertisement
 
 # As reported in AMO feedback section
 @@||nationalreview.com/sites/all/themes/*/assets/js/chartbeat.js$script
+
+# https://github.com/gorhill/uBlock/issues/1016#issuecomment-165153899
+@@||liveperson.net^$first-party
+
+# https://github.com/gorhill/uBlock/issues/1082
+@@||widgets.outbrain.com/outbrain.js$script,domain=www.themarker.com
+
+# https://github.com/gorhill/uBlock/issues/1081
+@@||google-analytics.com/ga.js$domain=one.co.il
+
+# To counter impending widespread breakage on Youtube until s.ytimg.com
+# removed from http://www.malwaredomains.com/
+@@||s.ytimg.com^

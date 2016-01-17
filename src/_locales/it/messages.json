@@ -33,7 +33,7 @@
   },
   "statsPageName":{
     "message":"uBlock₀ — Cronologia richieste di rete",
-    "description":"Title for the network request log window"
+    "description":"Title for the logger window"
   },
   "aboutPageName":{
     "message":"Info",
@@ -73,7 +73,7 @@
   },
   "popupTipLog":{
     "message":"Vai al registro delle richieste",
-    "description":"English: Go to request log"
+    "description":"Tooltip used for the logger icon in the panel"
   },
   "popupTipNoPopups":{
     "message":"Disabilita\/abilita il blocco di tutti i popup per questo sito",
@@ -90,6 +90,22 @@
   "popupTipNoRemoteFonts":{
     "message":"Attiva o disattiva il blocco dei font remoti per questo sito",
     "description":"English: Toggle the blocking of remote fonts for this site"
+  },
+  "popupTipGlobalRules":{
+    "message":"Regole globali: questa colonna è per le regole che si applicano a tutti i siti.",
+    "description":"Tooltip when hovering the top-most cell of the global-rules column."
+  },
+  "popupTipLocalRules":{
+    "message":"Regole locali: questa colonna è per le regole che si applicano solo al sito corrente.\nLe regole locali hanno la precedenza su quelle globali.",
+    "description":"Tooltip when hovering the top-most cell of the local-rules column."
+  },
+  "popupTipSaveRules":{
+    "message":"Clicca per rendere le tue scelte permanenti.",
+    "description":"Tooltip when hovering over the padlock in the dynamic filtering pane."
+  },
+  "popupTipRevertRules":{
+    "message":"Clicca per annullare i cambiamenti.",
+    "description":"Tooltip when hovering over the eraser in the dynamic filtering pane."
   },
   "popupAnyRulePrompt":{
     "message":"Tutto",
@@ -166,6 +182,10 @@
   "settingsIconBadgePrompt":{
     "message":"Visualizza il numero degli elementi bloccati sull'icona",
     "description":"English: Show the number of blocked requests on the icon"
+  },
+  "settingsTooltipsPrompt":{
+    "message":"Disabilita suggerimenti",
+    "description":"A checkbox in the Settings pane"
   },
   "settingsContextMenuPrompt":{
     "message":"Usa il menu contestuale quando è possibile",
@@ -573,7 +593,7 @@
   },
   "docblockedNoParamsPrompt":{
     "message":"senza parametri",
-    "description":"label to be used for the parameter-less URL"
+    "description":"label to be used for the parameter-less URL: https:\/\/cloud.githubusercontent.com\/assets\/585534\/9832014\/bfb1b8f0-593b-11e5-8a27-fba472a5529a.png"
   },
   "docblockedFoundIn":{
     "message":"Trovato in:",

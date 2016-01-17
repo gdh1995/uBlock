@@ -33,7 +33,7 @@
   },
   "statsPageName":{
     "message":"यूब्लॉक  —  नेटवर्क रिक्वेस्ट लॉग",
-    "description":"Title for the network request log window"
+    "description":"Title for the logger window"
   },
   "aboutPageName":{
     "message":"जानकारी",
@@ -73,7 +73,7 @@
   },
   "popupTipLog":{
     "message":"अनुरोध दैनिकी में जाए",
-    "description":"English: Go to request log"
+    "description":"Tooltip used for the logger icon in the panel"
   },
   "popupTipNoPopups":{
     "message":"इस साईट के लिए कोई पॉपअप नहीं",
@@ -90,6 +90,22 @@
   "popupTipNoRemoteFonts":{
     "message":"Toggle the blocking of remote fonts for this site",
     "description":"English: Toggle the blocking of remote fonts for this site"
+  },
+  "popupTipGlobalRules":{
+    "message":"Global rules: this column is for rules which apply to all sites.",
+    "description":"Tooltip when hovering the top-most cell of the global-rules column."
+  },
+  "popupTipLocalRules":{
+    "message":"Local rules: this column is for rules which apply to the current site only.\nLocal rules override global rules.",
+    "description":"Tooltip when hovering the top-most cell of the local-rules column."
+  },
+  "popupTipSaveRules":{
+    "message":"Click to make your changes permanent.",
+    "description":"Tooltip when hovering over the padlock in the dynamic filtering pane."
+  },
+  "popupTipRevertRules":{
+    "message":"Click to revert your changes.",
+    "description":"Tooltip when hovering over the eraser in the dynamic filtering pane."
   },
   "popupAnyRulePrompt":{
     "message":"सभी",
@@ -167,6 +183,10 @@
     "message":"Show the number of blocked requests on the icon",
     "description":"English: Show the number of blocked requests on the icon"
   },
+  "settingsTooltipsPrompt":{
+    "message":"Disable tooltips",
+    "description":"A checkbox in the Settings pane"
+  },
   "settingsContextMenuPrompt":{
     "message":"Make use of context menu where appropriate",
     "description":"English: Make use of context menu where appropriate"
@@ -216,7 +236,7 @@
     "description":"English: {{netFilterCount}} network filters ＋ {{cosmeticFilterCount}} cosmetic filters from:"
   },
   "3pListsOfBlockedHostsPerListStats":{
-    "message":"{{used}} used out of {{total}}",
+    "message":"{{total}} में से {{used}} का इस्तेमाल किया",
     "description":"English: {{used}} used out of {{total}}"
   },
   "3pAutoUpdatePrompt1":{
@@ -284,7 +304,7 @@
     "description":"English: Parse"
   },
   "3pExternalListPurge":{
-    "message":"purge cache",
+    "message":"कैश खाली",
     "description":"English: purge cache"
   },
   "3pExternalListNew":{
@@ -332,7 +352,7 @@
     "description":"This will remove all temporary rules"
   },
   "rulesCommit":{
-    "message":"Commit",
+    "message":"पक्का करो",
     "description":"This will persist temporary rules"
   },
   "rulesEdit":{
@@ -404,7 +424,7 @@
     "description":"English: Filter"
   },
   "logAll":{
-    "message":"All",
+    "message":"सब",
     "description":"Appears in the logger's tab selector"
   },
   "logBehindTheScene":{
@@ -424,7 +444,7 @@
     "description":"Label for the context selector"
   },
   "loggerURLFilteringTypeLabel":{
-    "message":"Type:",
+    "message":"प्रकार",
     "description":"Label for the type selector"
   },
   "loggerURLFilteringHeader":{
@@ -432,7 +452,7 @@
     "description":"Small header to identify the dynamic URL filtering section"
   },
   "loggerStaticFilteringHeader":{
-    "message":"Static filtering",
+    "message":"स्थायी छनाना",
     "description":"Small header to identify the static filtering section"
   },
   "loggerStaticFilteringSentence":{
@@ -528,27 +548,27 @@
     "description":"English: The message seen by the user to confirm subscription to a ABP filter list"
   },
   "elapsedOneMinuteAgo":{
-    "message":"a minute ago",
+    "message":"एक मिनट पहले",
     "description":"English: a minute ago"
   },
   "elapsedManyMinutesAgo":{
-    "message":"{{value}} minutes ago",
+    "message":"{{value}} मिनट पहले",
     "description":"English: {{value}} minutes ago"
   },
   "elapsedOneHourAgo":{
-    "message":"an hour ago",
+    "message":"एक घंटे पहले",
     "description":"English: an hour ago"
   },
   "elapsedManyHoursAgo":{
-    "message":"{{value}} hours ago",
+    "message":"{{value}} घंटे पहले",
     "description":"English: {{value}} hours ago"
   },
   "elapsedOneDayAgo":{
-    "message":"a day ago",
+    "message":"एक दिन पहले",
     "description":"English: a day ago"
   },
   "elapsedManyDaysAgo":{
-    "message":"{{value}} days ago",
+    "message":"{{value}} दिन पहले",
     "description":"English: {{value}} days ago"
   },
   "showDashboardButton":{
@@ -573,7 +593,7 @@
   },
   "docblockedNoParamsPrompt":{
     "message":"without parameters",
-    "description":"label to be used for the parameter-less URL"
+    "description":"label to be used for the parameter-less URL: https:\/\/cloud.githubusercontent.com\/assets\/585534\/9832014\/bfb1b8f0-593b-11e5-8a27-fba472a5529a.png"
   },
   "docblockedFoundIn":{
     "message":"Found in:",
@@ -596,7 +616,7 @@
     "description":"English: Temporarily"
   },
   "docblockedDisablePermanent":{
-    "message":"Permanently",
+    "message":"हमेशा",
     "description":"English: Permanently"
   },
   "cloudPush":{
@@ -616,7 +636,7 @@
     "description":"used as a prompt for the user to provide a custom device name"
   },
   "genericSubmit":{
-    "message":"Submit",
+    "message":"पक्का",
     "description":"for generic 'submit' buttons"
   },
   "genericRevert":{

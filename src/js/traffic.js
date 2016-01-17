@@ -60,7 +60,7 @@ var onBeforeRequest = function(details) {
     var µb = µBlock;
     var pageStore = µb.pageStoreFromTabId(tabId);
     if ( !pageStore ) {
-        var tabContext = µb.tabContextManager.lookup(tabId);
+        var tabContext = µb.tabContextManager.mustLookup(tabId);
         if ( vAPI.isBehindTheSceneTabId(tabContext.tabId) ) {
             return onBeforeBehindTheSceneRequest(details);
         }
@@ -131,9 +131,23 @@ var onBeforeRequest = function(details) {
         µb.updateBadgeAsync(tabId);
     }
 
-    // https://github.com/chrisaljoudi/uBlock/issues/18
-    // Do not use redirection, we need to block outright to be sure the request
-    // will not be made. There can be no such guarantee with redirection.
+    // https://github.com/gorhill/uBlock/issues/949
+    // Redirect blocked request?
+    var url = µb.redirectEngine.toURL(requestContext);
+    if ( url !== undefined ) {
+        if ( µb.logger.isEnabled() ) {
+            µb.logger.writeOne(
+                tabId,
+                'redirect',
+                'rr:' + µb.redirectEngine.resourceNameRegister,
+                'redirect',
+                requestURL,
+                requestContext.rootHostname,
+                requestContext.pageHostname
+            );
+        }
+        return { redirectUrl: url };
+    }
 
     return { cancel: true };
 };

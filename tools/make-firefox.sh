@@ -9,7 +9,6 @@ rm -rf $DES
 mkdir -p $DES
 
 cp -R assets                            $DES/
-./tools/fix-3p-assets.sh                $DES
 rm    $DES/assets/*.sh
 cp -R src/css                           $DES/
 cp -R src/img                           $DES/
@@ -17,6 +16,10 @@ cp -R src/js                            $DES/
 cp -R src/lib                           $DES/
 cp -R src/_locales                      $DES/
 cp    src/*.html                        $DES/
+
+# AMO review feedback: avoid "unnecessary files or folders" in package
+cat   src/background.html | sed -e '/vapi-polyfill\.js/d' > $DES/background.html
+
 mv    $DES/img/icon_128.png             $DES/icon.png
 cp    platform/firefox/css/*            $DES/css/
 cp    platform/firefox/vapi-*.js        $DES/js/

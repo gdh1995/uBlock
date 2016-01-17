@@ -292,7 +292,7 @@ PageStore.factory = function(tabId) {
 /******************************************************************************/
 
 PageStore.prototype.init = function(tabId) {
-    var tabContext = µb.tabContextManager.lookup(tabId);
+    var tabContext = µb.tabContextManager.mustLookup(tabId);
     this.tabId = tabId;
     this.tabHostname = tabContext.rootHostname;
     this.title = tabContext.rawURL;
@@ -304,6 +304,7 @@ PageStore.prototype.init = function(tabId) {
     this.perLoadAllowedRequestCount = 0;
     this.hiddenElementCount = ''; // Empty string means "unknown"
     this.remoteFontCount = 0;
+    this.popupBlockedCount = 0;
     this.netFilteringCache = NetFilteringResultCache.factory();
 
     // Support `elemhide` filter option. Called at this point so the required
@@ -335,7 +336,7 @@ PageStore.prototype.reuse = function(context) {
     // When force refreshing a page, the page store data needs to be reset.
 
     // If the hostname changes, we can't merely just update the context.
-    var tabContext = µb.tabContextManager.lookup(this.tabId);
+    var tabContext = µb.tabContextManager.mustLookup(this.tabId);
     if ( tabContext.rootHostname !== this.tabHostname ) {
         context = '';
     }
@@ -441,33 +442,22 @@ PageStore.prototype.createContextFromFrameHostname = function(frameHostname) {
 /******************************************************************************/
 
 PageStore.prototype.getNetFilteringSwitch = function() {
-    return µb.tabContextManager.lookup(this.tabId).getNetFilteringSwitch();
+    return µb.tabContextManager.mustLookup(this.tabId).getNetFilteringSwitch();
 };
 
 /******************************************************************************/
 
 PageStore.prototype.getSpecificCosmeticFilteringSwitch = function() {
-    if ( this.getNetFilteringSwitch() === false ) {
-        return false;
-    }
-
     var tabContext = µb.tabContextManager.lookup(this.tabId);
-
-    if ( µb.hnSwitches.evaluateZ('no-cosmetic-filtering', tabContext.rootHostname) ) {
-        return false;
-    }
-
-    return µb.userSettings.advancedUserEnabled === false ||
-           µb.sessionFirewall.mustAllowCellZY(tabContext.rootHostname, tabContext.rootHostname, '*') === false;
+    return tabContext !== null &&
+           µb.hnSwitches.evaluateZ('no-cosmetic-filtering', tabContext.rootHostname) !== true;
 };
 
 /******************************************************************************/
 
 PageStore.prototype.getGenericCosmeticFilteringSwitch = function() {
-    if ( this.skipCosmeticFiltering ) {
-        return false;
-    }
-    return this.getSpecificCosmeticFilteringSwitch();
+    return this.skipCosmeticFiltering !== true &&
+           this.getSpecificCosmeticFilteringSwitch();
 };
 
 /******************************************************************************/

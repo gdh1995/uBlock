@@ -32,8 +32,8 @@
     "description":"appears as tab name in dashboard"
   },
   "statsPageName":{
-    "message":"uBlock₀ — Záznam sieťových požiadavok",
-    "description":"Title for the network request log window"
+    "message":"uBlock₀ — Zaznamenávač",
+    "description":"Title for the logger window"
   },
   "aboutPageName":{
     "message":"O doplnku",
@@ -72,8 +72,8 @@
     "description":"English: Enter element picker mode"
   },
   "popupTipLog":{
-    "message":"Prejsť na záznam požiadaviek",
-    "description":"English: Go to request log"
+    "message":"Otvoriť Zaznamenávač",
+    "description":"Tooltip used for the logger icon in the panel"
   },
   "popupTipNoPopups":{
     "message":"Žiadne vyskakovacie okná pre túto stránku",
@@ -90,6 +90,22 @@
   "popupTipNoRemoteFonts":{
     "message":"Prepnúť blokovanie vzdialených písiem na tejto stránke",
     "description":"English: Toggle the blocking of remote fonts for this site"
+  },
+  "popupTipGlobalRules":{
+    "message":"Globálne pravidlá: tento stĺpec slúži pre pravidlá, ktoré platia pre všetky weby.",
+    "description":"Tooltip when hovering the top-most cell of the global-rules column."
+  },
+  "popupTipLocalRules":{
+    "message":"Lokálne pravidlá: tento stĺpec slúži pre pravidlá, ktoré platia len pre aktuálny web.\nLokálne pravidlá prepisujú globálne pravidlá.",
+    "description":"Tooltip when hovering the top-most cell of the local-rules column."
+  },
+  "popupTipSaveRules":{
+    "message":"Kliknutím použijete vaše zmeny.",
+    "description":"Tooltip when hovering over the padlock in the dynamic filtering pane."
+  },
+  "popupTipRevertRules":{
+    "message":"Kliknutím vrátite vaše zmeny.",
+    "description":"Tooltip when hovering over the eraser in the dynamic filtering pane."
   },
   "popupAnyRulePrompt":{
     "message":"všetko",
@@ -166,6 +182,10 @@
   "settingsIconBadgePrompt":{
     "message":"Zobraziť počet zablokovaných požiadaviek na ikone",
     "description":"English: Show the number of blocked requests on the icon"
+  },
+  "settingsTooltipsPrompt":{
+    "message":"Zakázať tipy pre nástroje",
+    "description":"A checkbox in the Settings pane"
   },
   "settingsContextMenuPrompt":{
     "message":"Používať kontextovú ponuku v prípade potreby",
@@ -573,7 +593,7 @@
   },
   "docblockedNoParamsPrompt":{
     "message":"bez parametrov",
-    "description":"label to be used for the parameter-less URL"
+    "description":"label to be used for the parameter-less URL: https:\/\/cloud.githubusercontent.com\/assets\/585534\/9832014\/bfb1b8f0-593b-11e5-8a27-fba472a5529a.png"
   },
   "docblockedFoundIn":{
     "message":"Nájdený v:",
