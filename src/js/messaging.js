@@ -128,10 +128,6 @@ var onMessage = function(request, sender, callback) {
         response = getDomainNames(request.targets);
         break;
 
-    case 'getUserSettings':
-        response = µb.userSettings;
-        break;
-
     case 'launchElementPicker':
         // Launched from some auxiliary pages, clear context menu coords.
         µb.mouseX = µb.mouseY = -1;
@@ -215,8 +211,8 @@ var getHostnameDict = function(hostnameToCountMap) {
                 domain: domain,
                 blockCount: blockCount,
                 allowCount: allowCount,
-                totalBlockCount: 0,
-                totalAllowCount: 0
+                totalBlockCount: blockCount,
+                totalAllowCount: allowCount
             };
         } else {
             de = r[domain];
@@ -277,6 +273,7 @@ var getFirewallRules = function(srcHostname, desHostnames) {
 
 var popupDataFromTabId = function(tabId, tabTitle) {
     var tabContext = µb.tabContextManager.mustLookup(tabId);
+    var rootHostname = tabContext.rootHostname;
     var r = {
         advancedUserEnabled: µb.userSettings.advancedUserEnabled,
         appName: vAPI.app.name,
@@ -290,7 +287,7 @@ var popupDataFromTabId = function(tabId, tabTitle) {
         netFilteringSwitch: false,
         rawURL: tabContext.rawURL,
         pageURL: tabContext.normalURL,
-        pageHostname: tabContext.rootHostname,
+        pageHostname: rootHostname,
         pageDomain: tabContext.rootDomain,
         pageAllowedRequestCount: 0,
         pageBlockedRequestCount: 0,
@@ -307,21 +304,22 @@ var popupDataFromTabId = function(tabId, tabTitle) {
         r.netFilteringSwitch = pageStore.getNetFilteringSwitch();
         r.hostnameDict = getHostnameDict(pageStore.hostnameToCountMap);
         r.contentLastModified = pageStore.contentLastModified;
-        r.firewallRules = getFirewallRules(tabContext.rootHostname, r.hostnameDict);
-        r.canElementPicker = tabContext.rootHostname.indexOf('.') !== -1;
-        r.noPopups = µb.hnSwitches.evaluateZ('no-popups', tabContext.rootHostname);
-        r.noStrictBlocking = µb.hnSwitches.evaluateZ('no-strict-blocking', tabContext.rootHostname);
-        r.noCosmeticFiltering = µb.hnSwitches.evaluateZ('no-cosmetic-filtering', tabContext.rootHostname);
-        r.noRemoteFonts = µb.hnSwitches.evaluateZ('no-remote-fonts', tabContext.rootHostname);
-        r.remoteFontCount = pageStore.remoteFontCount;
+        r.firewallRules = getFirewallRules(rootHostname, r.hostnameDict);
+        r.canElementPicker = rootHostname.indexOf('.') !== -1;
+        r.noPopups = µb.hnSwitches.evaluateZ('no-popups', rootHostname);
         r.popupBlockedCount = pageStore.popupBlockedCount;
+        r.noCosmeticFiltering = µb.hnSwitches.evaluateZ('no-cosmetic-filtering', rootHostname);
+        r.noLargeMedia = µb.hnSwitches.evaluateZ('no-large-media', rootHostname);
+        r.largeMediaCount = pageStore.largeMediaCount;
+        r.noRemoteFonts = µb.hnSwitches.evaluateZ('no-remote-fonts', rootHostname);
+        r.remoteFontCount = pageStore.remoteFontCount;
     } else {
         r.hostnameDict = {};
         r.firewallRules = getFirewallRules();
     }
     r.matrixIsDirty = !µb.sessionFirewall.hasSameRules(
         µb.permanentFirewall,
-        tabContext.rootHostname,
+        rootHostname,
         r.hostnameDict
     );
     return r;
@@ -1125,7 +1123,7 @@ var backupUserData = function(callback) {
         µb.extractSelectedFilterLists(onSelectedListsReady);
     };
 
-    µb.assets.get('assets/user/filters.txt', onUserFiltersReady);
+    µb.assets.get(µb.userFiltersPath, onUserFiltersReady);
 };
 
 /******************************************************************************/
@@ -1155,7 +1153,7 @@ var restoreUserData = function(request) {
 
         µb.keyvalSetOne('urlFilteringString', userData.urlFilteringString || '', onCountdown);
         µb.keyvalSetOne('hostnameSwitchesString', userData.hostnameSwitchesString || '', onCountdown);
-        µb.assets.put('assets/user/filters.txt', userData.userFilters, onCountdown);
+        µb.assets.put(µb.userFiltersPath, userData.userFilters, onCountdown);
         vAPI.storage.set({
             lastRestoreFile: request.file || '',
             lastRestoreTime: Date.now(),
@@ -1419,6 +1417,7 @@ var logCosmeticFilters = function(tabId, details) {
 
 var onMessage = function(request, sender, callback) {
     var tabId = sender && sender.tab ? sender.tab.id : 0;
+    var pageStore = µb.pageStoreFromTabId(tabId);
 
     // Async
     switch ( request.what ) {
@@ -1431,14 +1430,26 @@ var onMessage = function(request, sender, callback) {
 
     switch ( request.what ) {
     case 'liveCosmeticFilteringData':
-        var pageStore = µb.pageStoreFromTabId(tabId);
-        if ( pageStore ) {
+        if ( pageStore !== null ) {
             pageStore.hiddenElementCount = request.filteredElementCount;
         }
         break;
 
     case 'logCosmeticFilteringData':
         logCosmeticFilters(tabId, request);
+        break;
+
+    case 'temporarilyAllowLargeMediaElement':
+        if ( pageStore !== null ) {
+            pageStore.allowLargeMediaElementsUntil = Date.now() + 2000;
+        }
+        break;
+
+    case 'subscriberData':
+        response = {
+            confirmStr: vAPI.i18n('subscriberConfirm'),
+            externalLists: µBlock.userSettings.externalLists
+        };
         break;
 
     default:

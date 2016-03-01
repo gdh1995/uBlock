@@ -76,7 +76,7 @@ var onAllReady = function() {
     //quickProfiler.stop(0);
 
     vAPI.onLoadAllCompleted();
-
+    µb.contextMenu.update(null);
     µb.firstInstall = false;
 };
 

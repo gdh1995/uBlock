@@ -64,15 +64,20 @@ var L = (function(){
 
 1216.js application/javascript
 (function() {
-	delete window.noHomad;
-	try {
-		Object.defineProperty(window, 'noHomad', {
-			get: function() { return true; },
-			set: function() { }
-		});
-	} catch(ex) {
-	}
-})()
+	//
+	var sto = window.setTimeout;
+	var mysto = function(a, b) {
+		if ( b === 15000 && a.toString().lastIndexOf('function a()', 0) === 0 ) {
+			return;
+		}
+		return sto(a, b);
+	};
+	Object.defineProperty(window, 'setTimeout', {
+		get: function() {
+			return mysto;
+		}
+	});
+})();
 
 
 # fuckadblock defuser
@@ -98,9 +103,9 @@ fuckadblock.js-3.2.0 application/javascript
 		return this;
 	};
 	Fab.prototype.setOption = noopfn;
-	window.FuckAdBlock = Fab;
+	window.FuckAdBlock = window.BlockAdBlock = Fab;
 	//
-	window.fuckAdBlock = new Fab();
+	window.fuckAdBlock = window.blockAdBlock = new Fab();
 })();
 
 
@@ -235,6 +240,15 @@ google-analytics.com/analytics.js application/javascript
 	};
 	ga.remove = noopfn;
 	window[gaName] = ga;
+})();
+
+google-analytics.com/inpage_linkid.js application/javascript
+(function() {
+	window._gaq = window._gaq || {
+		push: function() {
+			;
+		}
+	};
 })();
 
 
@@ -389,21 +403,34 @@ yavli-defuser.js application/javascript
 			return '';
 		}
 	};
-	var noy = {
-		start: noopfn
-	};
 	try {
 		Object.defineProperty(window, '__durl', nourl);
 		Object.defineProperty(window, '__lsurl', nourl);
 		Object.defineProperty(window, '__lturl', nourl);
-		Object.defineProperty(window, '_y', {
-			set: noopfn,
-			get: function() {
-				return noy;
-			}
-		});
 	} catch (ex) {
 	}
+	var aa = ['_x','_y','_z','gj','pz','xz','yy','yz','zp','zx','zy'];
+	var no = {
+		set: noopfn,
+		get: function() {
+			return {
+				start: noopfn
+			};
+		}
+	};
+	while ( aa.length ) {
+		try {
+			Object.defineProperty(window, aa.pop(), no);
+		} catch (e) {
+		}
+	}
+	var sto = window.setTimeout;
+	window.setTimeout = function(a, b) {
+		var re = /rec\(rid,\s*tw\s*\+\s*step\)/;
+		if ( typeof b !== 'number' || (b % 200) !== 0 || !re.test(a.toString()) ) {
+			sto(a, b);
+		}
+	};
 })();
 
 
@@ -434,10 +461,22 @@ pornhub-popup-defuser.js application/javascript
 })();
 
 
+goyavelab-defuser.js application/javascript
+(function() {
+	var noopfn = function() {
+		;
+	};
+	Object.defineProperty(window, '_$14', {
+		get: function() { return noopfn; },
+		set: noopfn
+	});
+})();
+
+
 # https://news.ycombinator.com/item?id=10814913
 forbes-defuser.js application/javascript
 (function() {
-	if ( !window.location.pathname.startsWith('/forbes/welcome/') ) {
+	if ( window.location.pathname.lastIndexOf('/forbes/welcome/', 0) !== 0 ) {
 		return;
 	}
 	var noopfn = function() {
@@ -507,26 +546,33 @@ openload-defuser.js application/javascript
 	var noopfn = function() {
 		;
 	};
-	var makefn = function(a) {
-		return function(r, o) {
+	var excludes = ['157','161','175'];
+	var wjdmpGet = function() {
+		return wjdmp;
+	};
+	var wjdmpSet = function(a) {
+		wjdmp = function(r, o) {
 			if ( r.length === 1 && r[0] === 4 ) {
 				for ( var k in o ) {
-					if ( o.hasOwnProperty(k) && typeof o[k] === 'function' ) {
-						o[k] = noopfn;
+					if ( !o.hasOwnProperty(k) || typeof o[k] !== 'function' ) {
+						continue;
 					}
+					if ( excludes.indexOf(k.toString()) !== -1 ) {
+						continue;
+					}
+					o[k] = noopfn;
 				}
 			}
 			a(r, o);
 		};
 	};
-	Object.defineProperty(window, 'webpackJsonpdmp', {
-		get: function() {
-			return wjdmp;
-		},
-		set: function(a) {
-			wjdmp = makefn(a);
-		}
-	});
+	try {
+		Object.defineProperty(window, 'webpackJsonpdmp', {
+			get: wjdmpGet,
+			set: wjdmpSet
+		});
+	} catch(ex) {
+	}
 })();
 
 
@@ -546,6 +592,153 @@ kissanime-defuser.js application/javascript
 (function() {
 	Object.defineProperty(window, 'isBlockAds2', {
 		get: function() { return false; },
+		set: function(a) {}
+	});
+})();
+
+
+phenv-defuser.js application/javascript
+(function() {
+	var phenv = window.PHENV;
+	var noopfn = function() {
+		;
+	};
+	var trapOnDetection = function() {
+		if ( phenv.onDetection === undefined ) {
+			Object.defineProperty(phenv, 'onDetection', {
+				get: function() {
+					return noopfn;
+				},
+				set: noopfn
+			});
+			return;
+		}
+		phenv.onDetection = noopfn;
+	};
+	if ( phenv === undefined ) {
+		Object.defineProperty(window, 'PHENV', {
+			get: function() {
+				return phenv;
+			},
+			set: function(a) {
+				phenv = a;
+				trapOnDetection();
+			}
+		});
+		return;
+	}
+	trapOnDetection();
+})();
+
+
+scorecardresearch.com/beacon.js application/javascript
+(function() {
+	window.COMSCORE = {
+		purge: function() {
+			_comscore = [];
+		},
+		beacon: function() {
+			;
+		}
+	};
+})();
+
+
+# https://github.com/gorhill/uBlock/issues/1250#issuecomment-173533894
+widgets.outbrain.com/outbrain.js application/javascript
+(function() {
+	var noopfn = function() {
+		;
+	};
+	var obr = {};
+	var methods = [
+		'callClick', 'callLoadMore', 'callRecs', 'callUserZapping',
+		'callWhatIs', 'cancelRecommendation', 'cancelRecs', 'closeCard',
+		'closeModal', 'closeTbx', 'errorInjectionHandler', 'getCountOfRecs',
+		'getStat', 'imageError', 'manualVideoClicked', 'onOdbReturn',
+		'onVideoClick', 'pagerLoad', 'recClicked', 'refreshSpecificWidget',
+		'refreshWidget', 'reloadWidget', 'researchWidget', 'returnedError',
+		'returnedHtmlData', 'returnedIrdData', 'returnedJsonData', 'scrollLoad',
+		'showDescription', 'showRecInIframe', 'userZappingMessage', 'zappingFormAction'
+	];
+	obr.extern = {
+		video: {
+			getVideoRecs: noopfn,
+			videoClicked: noopfn
+		}
+	};
+	methods.forEach(function(a) {
+		obr.extern[a] = noopfn;
+	});
+	window.OBR = window.OBR || obr;
+})();
+
+
+# https://github.com/gorhill/uBlock/issues/1228
+window.name-defuser application/javascript
+if ( window === window.top ) {
+	window.name = null;
+}
+
+
+# https://github.com/gorhill/uBlock/issues/897#issuecomment-180871042
+doubleclick.net/instream/ad_status.js application/javascript
+window.google_ad_status = 1;
+
+
+# https://github.com/gorhill/uBlock/issues/1384
+addthis.com/addthis_widget.js application/javascript
+(function() {
+	var noopfn = function() {
+		;
+	};
+	window.addthis = {
+		addEventListener: noopfn,
+		init: noopfn,
+		layers: noopfn,
+		toolbox: noopfn,
+		update: noopfn
+	};
+})();
+
+
+# https://adblockplus.org/forum/viewtopic.php?f=2&t=43914#p147866
+wired-defuser.js application/javascript
+(function() {
+	var sto = window.setTimeout,
+		re = /^function n\(\)/;
+	window.setTimeout = function(a, b) {
+		if ( b !== 50 || !re.test(a.toString()) ) {
+			sto(a, b);
+		}
+	};
+})();
+
+
+# https://github.com/gorhill/uBlock/issues/1059#issuecomment-185434177
+# Works for stern.de, will see if reusable.
+bcplayer-defuser.js application/javascript
+(function() {
+	var bcPlayer;
+	Object.defineProperty(window, 'bcPlayer', {
+		get: function() {
+			return bcPlayer;
+		},
+		set: function(a) {
+			bcPlayer = a;
+			a.ads = function(a) {
+				;
+			};
+		}
+	});
+})();
+
+
+# https://forums.lanik.us/viewtopic.php?f=62&t=27719
+opensubtitles.org application/javascript
+(function() {
+	Object.defineProperty(window, '_0x1cae', {
+		get: function() { return []; },
 		set: function(a) {}
 	});
 })();
