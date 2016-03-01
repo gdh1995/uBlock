@@ -252,10 +252,6 @@ vAPI.tabs.registerListeners = function() {
         onNavigationClient(details);
     };
 
-    var onActivated = function(details) {
-        vAPI.contextMenu.onMustUpdate(details.tabId);
-    };
-
     var onUpdated = function(tabId, changeInfo, tab) {
         onUpdatedClient(tabId, changeInfo, tab);
     };
@@ -263,7 +259,6 @@ vAPI.tabs.registerListeners = function() {
     chrome.webNavigation.onBeforeNavigate.addListener(onBeforeNavigate);
     chrome.webNavigation.onCommitted.addListener(onCommitted);
     chrome.webNavigation.onCreatedNavigationTarget.addListener(onCreatedNavigationTarget);
-    chrome.tabs.onActivated.addListener(onActivated);
     chrome.tabs.onUpdated.addListener(onUpdated);
 
     if ( typeof this.onClosed === 'function' ) {
@@ -556,7 +551,6 @@ vAPI.setIcon = function(tabId, iconStatus, badge) {
         { '19': 'img/browsericons/icon19-off.png', '38': 'img/browsericons/icon38-off.png' };
 
     chrome.browserAction.setIcon({ tabId: tabId, path: iconPaths }, onIconReady);
-    vAPI.contextMenu.onMustUpdate(tabId);
 };
 
 /******************************************************************************/

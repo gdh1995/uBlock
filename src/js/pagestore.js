@@ -495,7 +495,6 @@ PageStore.prototype.logLargeMedia = (function() {
             this.tabId,
             'load-large-media-interactive'
         );
-        µb.contextMenu.update(this.tabId);
     };
     return function() {
         this.largeMediaCount += 1;
@@ -507,7 +506,6 @@ PageStore.prototype.logLargeMedia = (function() {
 
 PageStore.prototype.temporarilyAllowLargeMediaElements = function() {
     this.largeMediaCount = 0;
-    µb.contextMenu.update(this.tabId);
     this.allowLargeMediaElementsUntil = Date.now() + 86400000;
     µb.scriptlets.injectDeep(this.tabId, 'load-large-media-all');
 };

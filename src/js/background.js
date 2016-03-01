@@ -55,7 +55,7 @@ return {
         cloudStorageEnabled: false,
         collapseBlocked: true,
         colorBlindFriendly: false,
-        contextMenuEnabled: true,
+        contextMenuEnabled: false,
         dynamicFilteringEnabled: true,
         experimentalEnabled: false,
         externalLists: defaultExternalLists,
