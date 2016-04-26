@@ -1,7 +1,7 @@
 /*******************************************************************************
 
-    µBlock - a browser extension to block requests.
-    Copyright (C) 2014 The µBlock authors
+    uBlock Origin - a browser extension to block requests.
+    Copyright (C) 2014-2016 The uBlock Origin authors
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -782,6 +782,11 @@ vAPI.net.registerListeners = function() {
     var µb = µBlock;
     var µburi = µb.URI;
 
+    // https://bugs.chromium.org/p/chromium/issues/detail?id=410382
+    // Between Chromium 38-48, plug-ins' network requests were reported as
+    // type "other" instead of "object".
+    var is_v38_48 = /\bChrom[a-z]+\/(?:3[89]|4[0-8])\.[\d.]+\b/.test(navigator.userAgent);
+
     // Chromium-based browsers understand only these network request types.
     var validTypes = {
         'main_frame': true,
@@ -829,6 +834,14 @@ vAPI.net.registerListeners = function() {
 
     var normalizeRequestDetails = function(details) {
         details.tabId = details.tabId.toString();
+
+        // https://github.com/gorhill/uBlock/issues/1493
+        // Chromium 49+ support a new request type: `ping`, which is fired as
+        // a result of using `navigator.sendBeacon`.
+        if ( details.type === 'ping' ) {
+            details.type = 'beacon';
+            return;
+        }
 
         // The rest of the function code is to normalize type
         if ( details.type !== 'other' ) {
@@ -879,11 +892,40 @@ vAPI.net.registerListeners = function() {
         }
 
         // https://code.google.com/p/chromium/issues/detail?id=410382
-        details.type = 'object';
+        if ( is_v38_48 ) {
+            details.type = 'object';
+        }
+    };
+
+    // https://bugs.chromium.org/p/chromium/issues/detail?id=129353
+    // https://github.com/gorhill/uBlock/issues/1497
+    // Expose websocket-based network requests to uBO's filtering engine,
+    // logger, etc.
+    // Counterpart of following block of code is found in "vapi-client.js" --
+    // search for "https://github.com/gorhill/uBlock/issues/1497".
+    var onBeforeWebsocketRequest = function(details) {
+        details.type = 'websocket';
+        var matches = /url=([^&]+)/.exec(details.url);
+        details.url = decodeURIComponent(matches[1]);
+        var r = onBeforeRequestClient(details);
+        // Blocked?
+        if ( r && r.cancel ) {
+            return r;
+        }
+        // Returning a 1x1 transparent pixel means "not blocked".
+        return { redirectUrl: 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==' };
     };
 
     var onBeforeRequestClient = this.onBeforeRequest.callback;
     var onBeforeRequest = function(details) {
+        // https://github.com/gorhill/uBlock/issues/1497
+        if (
+            details.type === 'image' &&
+            details.url.endsWith('ubofix=f41665f3028c7fd10eecf573336216d3')
+        ) {
+            return onBeforeWebsocketRequest(details);
+        }
+
         normalizeRequestDetails(details);
         return onBeforeRequestClient(details);
     };

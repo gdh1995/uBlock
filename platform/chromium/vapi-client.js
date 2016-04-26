@@ -1,7 +1,7 @@
 /*******************************************************************************
 
-    µBlock - a browser extension to block requests.
-    Copyright (C) 2014 The µBlock authors
+    uBlock Origin - a browser extension to block requests.
+    Copyright (C) 2014-2016 The µBlock authors
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -29,6 +29,7 @@
 
 'use strict';
 
+/******************************************************************************/
 /******************************************************************************/
 
 // https://github.com/chrisaljoudi/uBlock/issues/464
@@ -92,240 +93,477 @@ vAPI.shutdown = (function() {
 })();
 
 /******************************************************************************/
+/******************************************************************************/
 
 vAPI.messaging = {
     port: null,
-    channels: {},
-    pending: {},
+    portTimer: null,
+    portTimerDelay: 10000,
+    channels: Object.create(null),
+    channelCount: 0,
+    pending: Object.create(null),
     pendingCount: 0,
     auxProcessId: 1,
+    shuttingDown: false,
 
-    onDisconnect: function() {
+    shutdown: function() {
+        this.shuttingDown = true;
+        this.destroyPort();
+    },
+
+    disconnectListener: function() {
         this.port = null;
-        this.close();
         vAPI.shutdown.exec();
     },
+    disconnectListenerCallback: null,
 
-    setup: function() {
-        try {
-            this.port = chrome.runtime.connect({name: vAPI.sessionId}) || null;
-        } catch (ex) {
+    messageListener: function(details) {
+        if ( !details ) {
+            return;
         }
-        if ( this.port === null ) {
-            vAPI.shutdown.exec();
-            return false;
+
+        // Sent to all channels
+        if ( details.broadcast === true && !details.channelName ) {
+            for ( var channelName in this.channels ) {
+                this.sendToChannelListeners(channelName, details.msg);
+            }
+            return;
         }
-        this.port.onMessage.addListener(messagingConnector);
-        this.port.onDisconnect.addListener(this.onDisconnect.bind(this));
-        return true;
+
+        // Response to specific message previously sent
+        if ( details.auxProcessId ) {
+            var listener = this.pending[details.auxProcessId];
+            delete this.pending[details.auxProcessId];
+            delete details.auxProcessId; // TODO: why?
+            if ( listener ) {
+                this.pendingCount -= 1;
+                listener(details.msg);
+                return;
+            }
+        }
+
+        // Sent to a specific channel
+        var response = this.sendToChannelListeners(details.channelName, details.msg);
+
+        // Respond back if required
+        if ( details.mainProcessId === undefined ) {
+            return;
+        }
+        var port = this.connect();
+        if ( port !== null ) {
+            port.postMessage({
+                mainProcessId: details.mainProcessId,
+                msg: response
+            });
+        }
     },
+    messageListenerCallback: null,
 
-    close: function() {
+    portPoller: function() {
+        this.portTimer = null;
+        if ( this.port !== null ) {
+            if ( this.channelCount !== 0 || this.pendingCount !== 0 ) {
+                this.portTimer = vAPI.setTimeout(this.portPollerCallback, this.portTimerDelay);
+                this.portTimerDelay = Math.min(this.portTimerDelay * 2, 60 * 60 * 1000);
+                return;
+            }
+        }
+        this.destroyPort();
+    },
+    portPollerCallback: null,
+
+    destroyPort: function() {
+        if ( this.portTimer !== null ) {
+            clearTimeout(this.portTimer);
+            this.portTimer = null;
+        }
         var port = this.port;
         if ( port !== null ) {
             port.disconnect();
-            port.onMessage.removeListener(messagingConnector);
-            port.onDisconnect.removeListener(this.onDisconnect);
+            port.onMessage.removeListener(this.messageListenerCallback);
+            port.onDisconnect.removeListener(this.disconnectListenerCallback);
             this.port = null;
         }
-        this.channels = {};
+        if ( this.channelCount !== 0 ) {
+            this.channels = Object.create(null);
+            this.channelCount = 0;
+        }
         // service pending callbacks
-        var pending = this.pending, listener;
-        this.pending = {};
-        this.pendingCount = 0;
-        for ( var auxId in pending ) {
-            if ( this.pending.hasOwnProperty(auxId) ) {
-                listener = pending[auxId];
-                if ( typeof listener === 'function' ) {
-                    listener(null);
+        if ( this.pendingCount !== 0 ) {
+            var pending = this.pending, callback;
+            this.pending = Object.create(null);
+            this.pendingCount = 0;
+            for ( var auxId in pending ) {
+                callback = pending[auxId];
+                if ( typeof callback === 'function' ) {
+                    callback(null);
                 }
             }
         }
     },
 
-    channel: function(channelName, callback) {
-        if ( !channelName ) {
-            return;
+    createPort: function() {
+        if ( this.shuttingDown ) {
+            return null;
         }
-        var channel = this.channels[channelName];
-        if ( channel instanceof MessagingChannel ) {
-            channel.addListener(callback);
-            channel.refCount += 1;
-        } else {
-            channel = this.channels[channelName] = new MessagingChannel(channelName, callback);
+        if ( this.messageListenerCallback === null ) {
+            this.messageListenerCallback = this.messageListener.bind(this);
+            this.disconnectListenerCallback = this.disconnectListener.bind(this);
+            this.portPollerCallback = this.portPoller.bind(this);
         }
-        return channel;
-    }
-};
-
-/******************************************************************************/
-
-var messagingConnector = function(details) {
-    if ( !details ) {
-        return;
-    }
-
-    var messaging = vAPI.messaging;
-    var channels = messaging.channels;
-    var channel;
-
-    // Sent to all channels
-    if ( details.broadcast === true && !details.channelName ) {
-        for ( channel in channels ) {
-            if ( channels[channel] instanceof MessagingChannel === false ) {
-                continue;
-            }
-            channels[channel].sendToListeners(details.msg);
+        try {
+            this.port = chrome.runtime.connect({name: vAPI.sessionId}) || null;
+        } catch (ex) {
+            this.port = null;
         }
-        return;
-    }
-
-    // Response to specific message previously sent
-    if ( details.auxProcessId ) {
-        var listener = messaging.pending[details.auxProcessId];
-        delete messaging.pending[details.auxProcessId];
-        delete details.auxProcessId; // TODO: why?
-        if ( listener ) {
-            messaging.pendingCount -= 1;
-            listener(details.msg);
-            return;
+        if ( this.port !== null ) {
+            this.port.onMessage.addListener(this.messageListenerCallback);
+            this.port.onDisconnect.addListener(this.disconnectListenerCallback);
         }
-    }
-
-    // Sent to a specific channel
-    var response;
-    channel = channels[details.channelName];
-    if ( channel instanceof MessagingChannel ) {
-        response = channel.sendToListeners(details.msg);
-    }
-
-    // Respond back if required
-    if ( details.mainProcessId !== undefined ) {
-        messaging.port.postMessage({
-            mainProcessId: details.mainProcessId,
-            msg: response
-        });
-    }
-};
-
-/******************************************************************************/
-
-var MessagingChannel = function(name, listener) {
-    this.channelName = name;
-    this.listeners = typeof listener === 'function' ? [listener] : [];
-    this.refCount = 1;
-    if ( typeof listener === 'function' ) {
-        var messaging = vAPI.messaging;
-        if ( messaging.port === null ) {
-            messaging.setup();
+        this.portTimerDelay = 10000;
+        if ( this.portTimer === null ) {
+            this.portTimer = vAPI.setTimeout(this.portPollerCallback, this.portTimerDelay);
         }
-    }
-};
+        return this.port;
+    },
 
-MessagingChannel.prototype.send = function(message, callback) {
-    this.sendTo(message, undefined, undefined, callback);
-};
+    connect: function() {
+        return this.port !== null ? this.port : this.createPort();
+    },
 
-MessagingChannel.prototype.sendTo = function(message, toTabId, toChannel, callback) {
-    var messaging = vAPI.messaging;
-    // Too large a gap between the last request and the last response means
-    // the main process is no longer reachable: memory leaks and bad
-    // performance become a risk -- especially for long-lived, dynamic
-    // pages. Guard against this.
-    if ( messaging.pendingCount > 25 ) {
-        //console.error('uBlock> Sigh. Main process is sulking. Will try to patch things up.');
-        messaging.close();
-    }
-    if ( messaging.port === null ) {
-        if ( messaging.setup() === false ) {
+    send: function(channelName, message, callback) {
+        this.sendTo(channelName, message, undefined, undefined, callback);
+    },
+
+    sendTo: function(channelName, message, toTabId, toChannel, callback) {
+        // Too large a gap between the last request and the last response means
+        // the main process is no longer reachable: memory leaks and bad
+        // performance become a risk -- especially for long-lived, dynamic
+        // pages. Guard against this.
+        if ( this.pendingCount > 25 ) {
+            vAPI.shutdown.exec();
+        }
+        var port = this.connect();
+        if ( port === null ) {
             if ( typeof callback === 'function' ) {
                 callback();
             }
             return;
         }
-    }
-    var auxProcessId;
-    if ( callback ) {
-        auxProcessId = messaging.auxProcessId++;
-        messaging.pending[auxProcessId] = callback;
-        messaging.pendingCount += 1;
-    }
-    messaging.port.postMessage({
-        channelName: this.channelName,
-        auxProcessId: auxProcessId,
-        toTabId: toTabId,
-        toChannel: toChannel,
-        msg: message
-    });
-};
-
-MessagingChannel.prototype.close = function() {
-    this.refCount -= 1;
-    if ( this.refCount !== 0 ) {
-        return;
-    }
-    var messaging = vAPI.messaging;
-    delete messaging.channels[this.channelName];
-    if ( Object.keys(messaging.channels).length === 0 ) {
-        messaging.close();
-    }
-};
-
-MessagingChannel.prototype.addListener = function(callback) {
-    if ( typeof callback !== 'function' ) {
-        return;
-    }
-    if ( this.listeners.indexOf(callback) !== -1 ) {
-        throw new Error('Duplicate listener.');
-    }
-    this.listeners.push(callback);
-    var messaging = vAPI.messaging;
-    if ( messaging.port === null ) {
-        messaging.setup();
-    }
-};
-
-MessagingChannel.prototype.removeListener = function(callback) {
-    if ( typeof callback !== 'function' ) {
-        return;
-    }
-    var pos = this.listeners.indexOf(callback);
-    if ( pos === -1 ) {
-        throw new Error('Listener not found.');
-    }
-    this.listeners.splice(pos, 1);
-};
-
-MessagingChannel.prototype.removeAllListeners = function() {
-    this.listeners = [];
-};
-
-MessagingChannel.prototype.sendToListeners = function(msg) {
-    var response;
-    var listeners = this.listeners;
-    for ( var i = 0, n = listeners.length; i < n; i++ ) {
-        response = listeners[i](msg);
-        if ( response !== undefined ) {
-            break;
+        var auxProcessId;
+        if ( callback ) {
+            auxProcessId = this.auxProcessId++;
+            this.pending[auxProcessId] = callback;
+            this.pendingCount += 1;
         }
+        port.postMessage({
+            channelName: channelName,
+            auxProcessId: auxProcessId,
+            toTabId: toTabId,
+            toChannel: toChannel,
+            msg: message
+        });
+    },
+
+    addChannelListener: function(channelName, callback) {
+        if ( typeof callback !== 'function' ) {
+            return;
+        }
+        var listeners = this.channels[channelName];
+        if ( listeners !== undefined && listeners.indexOf(callback) !== -1 ) {
+            console.error('Duplicate listener on channel "%s"', channelName);
+            return;
+        }
+        if ( listeners === undefined ) {
+            this.channels[channelName] = [callback];
+            this.channelCount += 1;
+        } else {
+            listeners.push(callback);
+        }
+        this.connect();
+    },
+
+    removeChannelListener: function(channelName, callback) {
+        if ( typeof callback !== 'function' ) {
+            return;
+        }
+        var listeners = this.channels[channelName];
+        if ( listeners === undefined ) {
+            return;
+        }
+        var pos = this.listeners.indexOf(callback);
+        if ( pos === -1 ) {
+            console.error('Listener not found on channel "%s"', channelName);
+            return;
+        }
+        listeners.splice(pos, 1);
+        if ( listeners.length === 0 ) {
+            delete this.channels[channelName];
+            this.channelCount -= 1;
+        }
+    },
+
+    removeAllChannelListeners: function(channelName) {
+        var listeners = this.channels[channelName];
+        if ( listeners === undefined ) {
+            return;
+        }
+        delete this.channels[channelName];
+        this.channelCount -= 1;
+    },
+
+    sendToChannelListeners: function(channelName, msg) {
+        var listeners = this.channels[channelName];
+        if ( listeners === undefined ) {
+            return;
+        }
+        var response;
+        for ( var i = 0, n = listeners.length; i < n; i++ ) {
+            response = listeners[i](msg);
+            if ( response !== undefined ) {
+                break;
+            }
+        }
+        return response;
     }
-    return response;
 };
+
+/******************************************************************************/
+
+vAPI.shutdown.add(function() {
+    vAPI.messaging.shutdown();
+    delete window.vAPI;
+});
 
 // https://www.youtube.com/watch?v=rT5zCHn0tsg
 // https://www.youtube.com/watch?v=E-jS4e3zacI
 
 /******************************************************************************/
 
-// No need to have vAPI client linger around after shutdown if
-// we are not a top window (because element picker can still
-// be injected in top window).
-if ( window !== window.top ) {
-    vAPI.shutdown.add(function() {
-        vAPI = null;
-    });
-}
+// https://bugs.chromium.org/p/chromium/issues/detail?id=129353
+// https://github.com/gorhill/uBlock/issues/956
+// https://github.com/gorhill/uBlock/issues/1497
+// Trap calls to WebSocket constructor, and expose websocket-based network
+// requests to uBO's filtering engine, logger, etc.
+// Counterpart of following block of code is found in "vapi-background.js" --
+// search for "https://github.com/gorhill/uBlock/issues/1497".
 
+(function() {
+    // Fix won't be applied on older versions of Chromium.
+    if (
+        window.WebSocket instanceof Function === false ||
+        window.WeakMap instanceof Function === false
+    ) {
+        return;
+    }
+
+    // Only for http/https documents.
+    if ( /^https?:/.test(window.location.protocol) !== true ) {
+        return;
+    }
+
+    var doc = document;
+    var parent = doc.head || doc.documentElement;
+    if ( parent === null ) {
+        return;
+    }
+
+    // WebSocket reference: https://html.spec.whatwg.org/multipage/comms.html
+    // The script tag will remove itself from the DOM once it completes
+    // execution.
+    // Ideally, the `js/websocket.js` script would be declared as a
+    // `web_accessible_resources` in the manifest, but this unfortunately would
+    // open the door for web pages to identify *directly* that one is using
+    // uBlock Origin. Consequently, I have to inject the code as a literal
+    // string below :(
+    // For code review, the stringified code below is found in
+    // `js/websocket.js` (comments were stripped).
+    var script = doc.createElement('script');
+    script.id = 'ubofix-f41665f3028c7fd10eecf573336216d3';
+    script.textContent = [
+        "(function() {",
+        "    'use strict';",
+        "",
+        "    var Wrapped = window.WebSocket;",
+        "    var toWrapped = new WeakMap();",
+        "",
+        "    var onResponseReceived = function(wrapper, ok) {",
+        "        this.onload = this.onerror = null;",
+        "        var bag = toWrapped.get(wrapper);",
+        "        if ( !ok ) {",
+        "            if ( bag.properties.onerror ) {",
+        "                bag.properties.onerror(new window.ErrorEvent('error'));",
+        "            }",
+        "            return;",
+        "        }",
+        "        var wrapped = new Wrapped(bag.args.url, bag.args.protocols);",
+        "        for ( var prop in bag.properties ) {",
+        "            wrapped[prop] = bag.properties[prop];",
+        "        }",
+        "        toWrapped.set(wrapper, wrapped);",
+        "    };",
+        "",
+        "    var noopfn = function() {",
+        "    };",
+        "",
+        "    var fallthruGet = function(wrapper, prop, value) {",
+        "        var wrapped = toWrapped.get(wrapper);",
+        "        if ( !wrapped ) {",
+        "            return value;",
+        "        }",
+        "        if ( wrapped instanceof Wrapped ) {",
+        "            return wrapped[prop];",
+        "        }",
+        "        return wrapped.properties.hasOwnProperty(prop) ?",
+        "            wrapped.properties[prop] :",
+        "            value;",
+        "    };",
+        "",
+        "    var fallthruSet = function(wrapper, prop, value) {",
+        "        if ( value instanceof Function ) {",
+        "            value = value.bind(wrapper);",
+        "        }",
+        "        var wrapped = toWrapped.get(wrapper);",
+        "        if ( !wrapped ) {",
+        "            return;",
+        "        }",
+        "        if ( wrapped instanceof Wrapped ) {",
+        "            wrapped[prop] = value;",
+        "        } else {",
+        "            wrapped.properties[prop] = value;",
+        "        }",
+        "    };",
+        "",
+        "    var WebSocket = function(url, protocols) {",
+        "        if ( window.location.protocol === 'https:' && /^ws:/.test(url) ) {",
+        "            var ws = new Wrapped(url, protocols);",
+        "            if ( ws ) {",
+        "                ws.close();",
+        "            }",
+        "        }",
+        "",
+        "        Object.defineProperties(this, {",
+        "            'binaryType': {",
+        "                get: function() {",
+        "                    return fallthruGet(this, 'binaryType', '');",
+        "                },",
+        "                set: function(value) {",
+        "                    fallthruSet(this, 'binaryType', value);",
+        "                }",
+        "            },",
+        "            'bufferedAmount': {",
+        "                get: function() {",
+        "                    return fallthruGet(this, 'bufferedAmount', 0);",
+        "                },",
+        "                set: noopfn",
+        "            },",
+        "            'extensions': {",
+        "                get: function() {",
+        "                    return fallthruGet(this, 'extensions', '');",
+        "                },",
+        "                set: noopfn",
+        "            },",
+        "            'onclose': {",
+        "                get: function() {",
+        "                    return fallthruGet(this, 'onclose', null);",
+        "                },",
+        "                set: function(value) {",
+        "                    fallthruSet(this, 'onclose', value);",
+        "                }",
+        "            },",
+        "            'onerror': {",
+        "                get: function() {",
+        "                    return fallthruGet(this, 'onerror', null);",
+        "                },",
+        "                set: function(value) {",
+        "                    fallthruSet(this, 'onerror', value);",
+        "                }",
+        "            },",
+        "            'onmessage': {",
+        "                get: function() {",
+        "                    return fallthruGet(this, 'onmessage', null);",
+        "                },",
+        "                set: function(value) {",
+        "                    fallthruSet(this, 'onmessage', value);",
+        "                }",
+        "            },",
+        "            'onopen': {",
+        "                get: function() {",
+        "                    return fallthruGet(this, 'onopen', null);",
+        "                },",
+        "                set: function(value) {",
+        "                    fallthruSet(this, 'onopen', value);",
+        "                }",
+        "            },",
+        "            'protocol': {",
+        "                get: function() {",
+        "                    return fallthruGet(this, 'protocol', '');",
+        "                },",
+        "                set: noopfn",
+        "            },",
+        "            'readyState': {",
+        "                get: function() {",
+        "                    return fallthruGet(this, 'readyState', 0);",
+        "                },",
+        "                set: noopfn",
+        "            },",
+        "            'url': {",
+        "                get: function() {",
+        "                    return fallthruGet(this, 'url', '');",
+        "                },",
+        "                set: noopfn",
+        "            }",
+        "        });",
+        "",
+        "        toWrapped.set(this, {",
+        "            args: { url: url, protocols: protocols },",
+        "            properties: {}",
+        "        });",
+        "",
+        "        var img = new Image();",
+        "        img.src = ",
+        "              window.location.origin",
+        "            + '?url=' + encodeURIComponent(url)",
+        "            + '&ubofix=f41665f3028c7fd10eecf573336216d3';",
+        "        img.onload = onResponseReceived.bind(img, this, true);",
+        "        img.onerror = onResponseReceived.bind(img, this, false);",
+        "    };",
+        "",
+        "    WebSocket.prototype.CONNECTING = 0;",
+        "    WebSocket.prototype.OPEN = 1;",
+        "    WebSocket.prototype.CLOSING = 2;",
+        "    WebSocket.prototype.CLOSED = 3;",
+        "",
+        "    WebSocket.prototype.close = function(code, reason) {",
+        "        var wrapped = toWrapped.get(this);",
+        "        if ( wrapped instanceof Wrapped ) {",
+        "            wrapped.close(code, reason);",
+        "        }",
+        "    };",
+        "",
+        "    WebSocket.prototype.send = function(data) {",
+        "        var wrapped = toWrapped.get(this);",
+        "        if ( wrapped instanceof Wrapped ) {",
+        "            wrapped.send(data);",
+        "        }",
+        "    };",
+        "",
+        "    window.WebSocket = WebSocket;",
+        "",
+        "    var me = document.getElementById('ubofix-f41665f3028c7fd10eecf573336216d3');",
+        "    if ( me !== null && me.parentNode !== null ) {",
+        "        me.parentNode.removeChild(me);",
+        "    }",
+        "})();",
+    ].join('\n');
+
+    try {
+        parent.appendChild(script);
+    } catch (ex) {
+    }
+})();
+
+/******************************************************************************/
 /******************************************************************************/
 
 })(this);
