@@ -1023,16 +1023,6 @@ vAPI.onLoadAllCompleted = function() {
     var scriptDone = function() {
         vAPI.lastError();
     };
-    var scriptEnd = function(tabId) {
-        if ( vAPI.lastError() ) {
-            return;
-        }
-        vAPI.tabs.injectScript(tabId, {
-            file: 'js/contentscript-end.js',
-            allFrames: true,
-            runAt: 'document_idle'
-        }, scriptDone);
-    };
     var scriptStart = function(tabId) {
         vAPI.tabs.injectScript(tabId, {
             file: 'js/vapi-client.js',
@@ -1040,10 +1030,10 @@ vAPI.onLoadAllCompleted = function() {
             runAt: 'document_idle'
         }, function(){ });
         vAPI.tabs.injectScript(tabId, {
-            file: 'js/contentscript-start.js',
+            file: 'js/contentscript.js',
             allFrames: true,
             runAt: 'document_idle'
-        }, function(){ scriptEnd(tabId); });
+        }, scriptDone);
     };
     var bindToTabs = function(tabs) {
         var µb = µBlock;

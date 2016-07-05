@@ -1,7 +1,7 @@
 /*******************************************************************************
 
-    uBlock - a browser extension to block requests.
-    Copyright (C) 2014-2015 Raymond Hill
+    uBlock Origin - a browser extension to block requests.
+    Copyright (C) 2014-2016 Raymond Hill
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -22,11 +22,11 @@
 /* jshint bitwise: false */
 /* global punycode */
 
+'use strict';
+
 /******************************************************************************/
 
 µBlock.staticNetFilteringEngine = (function(){
-
-'use strict';
 
 /******************************************************************************/
 
@@ -209,8 +209,10 @@ var strToRegex = function(s, anchor, flags) {
 
     // https://www.loggly.com/blog/five-invaluable-techniques-to-improve-regex-performance/
     // https://developer.mozilla.org/en/docs/Web/JavaScript/Guide/Regular_Expressions
+    // Also: remove leading/trailing wildcards -- there is no point.
     var reStr = s.replace(/[.+?${}()|[\]\\]/g, '\\$&')
                  .replace(/\^/g, '(?:[^%.0-9a-z_-]|$)')
+                 .replace(/^\*|\*$/g, '')
                  .replace(/\*/g, '[^ ]*?');
 
     if ( anchor < 0 ) {
@@ -919,7 +921,7 @@ FilterGenericHnAnchoredHostname.fromSelfie = function(s) {
 // Regex-based filters
 
 var FilterRegex = function(s) {
-    this.re = new RegExp(s);
+    this.re = new RegExp(s, 'i');
 };
 
 FilterRegex.prototype.match = function(url) {
@@ -946,7 +948,7 @@ FilterRegex.fromSelfie = function(s) {
 /******************************************************************************/
 
 var FilterRegexHostname = function(s, domainOpt) {
-    this.re = new RegExp(s);
+    this.re = new RegExp(s, 'i');
     this.domainOpt = domainOpt;
     this.hostnameTest = hostnameTestPicker(this);
 };
@@ -1541,7 +1543,10 @@ FilterParser.prototype.parse = function(raw) {
         }
 
         // plain hostname? (from ABP filter list)
-        if ( this.reHostnameRule2.test(s) ) {
+        // https://github.com/gorhill/uBlock/issues/1757
+        // A filter can't be a pure-hostname one if there is a domain option
+        // present.
+        if ( this.domainOpt === '' && this.reHostnameRule2.test(s) ) {
             this.f = s.replace(this.reCleanupHostnameRule2, '');
             this.hostnamePure = true;
             return this;
@@ -1563,7 +1568,11 @@ FilterParser.prototype.parse = function(raw) {
     // normalize placeholders
     if ( this.reHasWildcard.test(s) ) {
         // remove pointless leading *
-        if ( s.startsWith('*') ) {
+        // https://github.com/gorhill/uBlock/issues/1669#issuecomment-224822448
+        // Keep the leading asterisk if we are dealing with a hostname-anchored
+        // filter, this will ensure the generic filter implementation is
+        // used.
+        if ( s.startsWith('*') && this.hostnameAnchored === false ) {
             s = s.replace(/^\*+([^%0-9a-z])/, '$1');
         }
         // remove pointless trailing *
@@ -1941,9 +1950,11 @@ FilterContainer.prototype.compile = function(raw, out) {
 
 FilterContainer.prototype.compileHostnameOnlyFilter = function(parsed, out) {
     // Can't fit the filter in a pure hostname dictionary.
-    if ( parsed.domainOpt.length !== 0 ) {
-        return;
-    }
+    // https://github.com/gorhill/uBlock/issues/1757
+    // This should no longer happen with fix to above issue.
+    //if ( parsed.domainOpt.length !== 0 ) {
+    //    return;
+    //}
 
     var party = AnyParty;
     if ( parsed.firstParty !== parsed.thirdParty ) {
@@ -1982,10 +1993,6 @@ FilterContainer.prototype.compileHostnameOnlyFilter = function(parsed, out) {
 
 FilterContainer.prototype.compileFilter = function(parsed, out) {
     parsed.makeToken();
-    if ( parsed.token === '*' && parsed.hostnameAnchored ) {
-        console.error('FilterContainer.compileFilter("%s"): invalid filter', parsed.f);
-        return false;
-    }
 
     var party = AnyParty;
     if ( parsed.firstParty !== parsed.thirdParty ) {

@@ -1,7 +1,7 @@
 /*******************************************************************************
 
-    µBlock - a browser extension to block requests.
-    Copyright (C) 2014 Raymond Hill
+    uBlock Origin - a browser extension to block requests.
+    Copyright (C) 2014-2016 Raymond Hill
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -20,13 +20,13 @@
 */
 
 /* jshint bitwise: false */
-/* global punycode, µBlock */
+/* global punycode */
+
+'use strict';
 
 /******************************************************************************/
 
 µBlock.cosmeticFilteringEngine = (function(){
-
-'use strict';
 
 /******************************************************************************/
 
@@ -141,40 +141,6 @@ FilterPlainMore.fromSelfie = function(s) {
 
 /******************************************************************************/
 
-var FilterBucket = function(a, b) {
-    this.f = null;
-    this.filters = [];
-    if ( a !== undefined ) {
-        this.filters[0] = a;
-        if ( b !== undefined ) {
-            this.filters[1] = b;
-        }
-    }
-};
-
-FilterBucket.prototype.add = function(a) {
-    this.filters.push(a);
-};
-
-FilterBucket.prototype.retrieve = function(s, out) {
-    var i = this.filters.length;
-    while ( i-- ) {
-        this.filters[i].retrieve(s, out);
-    }
-};
-
-FilterBucket.prototype.fid = '[]';
-
-FilterBucket.prototype.toSelfie = function() {
-    return this.filters.length.toString();
-};
-
-FilterBucket.fromSelfie = function() {
-    return new FilterBucket();
-};
-
-/******************************************************************************/
-
 // Any selector specific to a hostname
 // Examples:
 //   search.snapdo.com###ABottomD
@@ -236,6 +202,40 @@ FilterEntity.fromSelfie = function(s) {
 };
 
 /******************************************************************************/
+
+var FilterBucket = function(a, b) {
+    this.f = null;
+    this.filters = [];
+    if ( a !== undefined ) {
+        this.filters[0] = a;
+        if ( b !== undefined ) {
+            this.filters[1] = b;
+        }
+    }
+};
+
+FilterBucket.prototype.add = function(a) {
+    this.filters.push(a);
+};
+
+FilterBucket.prototype.retrieve = function(s, out) {
+    var i = this.filters.length;
+    while ( i-- ) {
+        this.filters[i].retrieve(s, out);
+    }
+};
+
+FilterBucket.prototype.fid = '[]';
+
+FilterBucket.prototype.toSelfie = function() {
+    return this.filters.length.toString();
+};
+
+FilterBucket.fromSelfie = function() {
+    return new FilterBucket();
+};
+
+/******************************************************************************/
 /******************************************************************************/
 
 var FilterParser = function() {
@@ -245,11 +245,13 @@ var FilterParser = function() {
     this.invalid = false;
     this.cosmetic = true;
     this.reScriptTagFilter = /^script:(contains|inject)\((.+?)\)$/;
+    this.reNeedHostname = /^(?:.+?:has|:xpath)\(.+?\)$/;
 };
 
 /******************************************************************************/
 
 FilterParser.prototype.reset = function() {
+    this.raw = '';
     this.prefix = this.suffix = this.style = '';
     this.unhide = 0;
     this.hostnames.length = 0;
@@ -263,6 +265,8 @@ FilterParser.prototype.reset = function() {
 FilterParser.prototype.parse = function(raw) {
     // important!
     this.reset();
+
+    this.raw = raw;
 
     // Find the bounds of the anchor.
     var lpos = raw.indexOf('#');
@@ -293,17 +297,29 @@ FilterParser.prototype.parse = function(raw) {
 
     // https://github.com/gorhill/uBlock/issues/952
     // Find out whether we are dealing with an Adguard-specific cosmetic
-    // filter, and if so, discard the filter.
+    // filter, and if so, translate it if supported, or discard it if not
+    // supported.
     var cCode = raw.charCodeAt(rpos - 1);
     if ( cCode !== 0x23 /* '#' */ && cCode !== 0x40 /* '@' */ ) {
         // We have an Adguard cosmetic filter if and only if the character is
         // `$` or `%`, otherwise it's not a cosmetic filter.
-        if ( cCode === 0x24 /* '$' */ || cCode === 0x25 /* '%' */ ) {
-            this.invalid = true;
-        } else {
+        // Not a cosmetic filter.
+        if ( cCode !== 0x24 /* '$' */ && cCode !== 0x25 /* '%' */ ) {
             this.cosmetic = false;
+            return this;
         }
-        return this;
+        // Not supported.
+        if ( cCode !== 0x24 /* '$' */ ) {
+            this.invalid = true;
+            return this;
+        }
+        // CSS injection rule: supported, but translate into uBO's own format.
+        raw = this.translateAdguardCSSInjectionFilter(raw);
+        if ( raw === '' ) {
+            this.invalid = true;
+            return this;
+        }
+        rpos = raw.indexOf('#', lpos + 1);
     }
 
     // Extract the hostname(s).
@@ -315,17 +331,6 @@ FilterParser.prototype.parse = function(raw) {
     this.suffix = raw.slice(rpos + 1);
     if ( this.suffix.length === 0 ) {
         this.cosmetic = false;
-        return this;
-    }
-
-    // Cosmetic filters with explicit style properties can apply only:
-    // - to specific cosmetic filters (those which apply to a specific site)
-    // - to block cosmetic filters (not exception cosmetic filters)
-    if ( this.suffix.endsWith('}') ) {
-        // Not supported for now: this code will ensure some backward
-        // compatibility for when cosmetic filters with explicit style
-        // properties start to be in use.
-        this.invalid = true;
         return this;
     }
 
@@ -349,6 +354,16 @@ FilterParser.prototype.parse = function(raw) {
         this.hostnames = this.prefix.split(/\s*,\s*/);
     }
 
+    // For some selectors, it is mandatory to have a hostname or entity.
+    if (
+        this.hostnames.length === 0 &&
+        this.unhide === 0 &&
+        this.reNeedHostname.test(this.suffix)
+    ) {
+        this.invalid = true;
+        return this;
+    }
+
     // Script tag filters: pre-process them so that can be used with minimal
     // overhead in the content script.
     // Examples:
@@ -357,10 +372,35 @@ FilterParser.prototype.parse = function(raw) {
     //   focus.de##script:inject(uabinject-defuser.js)
 
     var matches = this.reScriptTagFilter.exec(this.suffix);
-    if ( matches === null ) {
-        return this;
+    if ( matches !== null ) {
+        return this.parseScriptTagFilter(matches);
     }
 
+    return this;
+};
+
+/******************************************************************************/
+
+// Reference: https://adguard.com/en/filterrules.html#cssInjection
+
+FilterParser.prototype.translateAdguardCSSInjectionFilter = function(raw) {
+    var matches = /^([^#]*)#(@?)\$#([^{]+)\{([^}]+)\}$/.exec(raw);
+    if ( matches === null ) {
+        return '';
+    }
+    // For now we do not allow generic CSS injections (prolly never).
+    if ( matches[1] === '' && matches[2] !== '@' ) {
+        return '';
+    }
+    return matches[1] +
+           '#' + matches[2] + '#' +
+           matches[3].trim() +
+           ':style(' +  matches[4].trim() + ')';
+};
+
+/******************************************************************************/
+
+FilterParser.prototype.parseScriptTagFilter = function(matches) {
     // Currently supported only as non-generic selector. Also, exception
     // script tag filter makes no sense, ignore.
     if ( this.hostnames.length === 0 || this.unhide === 1 ) {
@@ -378,7 +418,7 @@ FilterParser.prototype.parse = function(raw) {
         } else {
             token = token.slice(1, -1);
             if ( isBadRegex(token) ) {
-                µb.logger.writeOne('', 'error', 'Cosmetic filtering – bad regular expression: ' + raw + ' (' + isBadRegex.message + ')');
+                µb.logger.writeOne('', 'error', 'Cosmetic filtering – bad regular expression: ' + this.raw + ' (' + isBadRegex.message + ')');
                 this.invalid = true;
             }
         }
@@ -652,10 +692,15 @@ FilterContainer.prototype.reset = function() {
     this.highMediumGenericHide = {};
     this.highMediumGenericHideCount = 0;
 
-    // everything else
-    this.highHighGenericHideArray = [];
-    this.highHighGenericHide = '';
-    this.highHighGenericHideCount = 0;
+    // high-high-simple selectors
+    this.highHighSimpleGenericHideArray = [];
+    this.highHighSimpleGenericHide = '';
+    this.highHighSimpleGenericHideCount = 0;
+
+    // high-high-complex selectors
+    this.highHighComplexGenericHideArray = [];
+    this.highHighComplexGenericHide = '';
+    this.highHighComplexGenericHideCount = 0;
 
     // generic exception filters
     this.genericDonthide = [];
@@ -674,29 +719,74 @@ FilterContainer.prototype.reset = function() {
 // https://github.com/chrisaljoudi/uBlock/issues/1004
 // Detect and report invalid CSS selectors.
 
+// Discard new ABP's `-abp-properties` directive until it is
+// implemented (if ever). Unlikely, see:
+// https://github.com/gorhill/uBlock/issues/1752
+
 FilterContainer.prototype.isValidSelector = (function() {
     var div = document.createElement('div');
-
+    var matchesProp = (function() {
+        if ( typeof div.matches === 'function' ) {
+            return 'matches';
+        }
+        if ( typeof div.mozMatchesSelector === 'function' ) {
+            return 'mozMatchesSelector';
+        }
+        if ( typeof div.webkitMatchesSelector === 'function' ) {
+            return 'webkitMatchesSelector';
+        }
+        return '';
+    })();
     // Not all browsers support `Element.matches`:
     // http://caniuse.com/#feat=matchesselector
-    if ( typeof div.matches !== 'function' ) {
+    if ( matchesProp === '' ) {
         return function() {
             return true;
         };
     }
 
-    return function(s) {
+    var reHasSelector = /^(.+?):has\((.+?)\)$/;
+    var reStyleSelector = /^(.+?):style\((.+?)\)$/;
+    var reXpathSelector = /^:xpath\((.+?)\)$/;
+
+    // Keep in mind: https://github.com/gorhill/uBlock/issues/693
+    var isValidCSSSelector = function(s) {
         try {
-            // https://github.com/gorhill/uBlock/issues/693
-            div.matches(s + ',\n#foo');
-            // Discard new ABP's `-abp-properties` directive until it is
-            // implemented (if ever).
-            if ( s.indexOf('[-abp-properties=') === -1 ) {
-                return true;
-            }
-        } catch (e) {
+            div[matchesProp](s + ',\n#foo');
+        } catch (ex) {
+            return false;
+        }
+        return true;
+    };
+
+    return function(s) {
+        if ( isValidCSSSelector(s) && s.indexOf('[-abp-properties=') === -1 ) {
+            return true;
         }
         // We reach this point very rarely.
+        var matches;
+
+        // Future `:has`-based filter? If so, validate both parts of the whole
+        // selector.
+        matches = reHasSelector.exec(s);
+        if ( matches !== null ) {
+            return this.isValidSelector(matches[1]) && this.isValidSelector(matches[2]);
+        }
+        // Custom `:xpath`-based filter?
+        matches = reXpathSelector.exec(s);
+        if ( matches !== null ) {
+            try {
+                return document.createExpression(matches[1], null) instanceof XPathExpression;
+            } catch (e) {
+            }
+            return false;
+        }
+        // `:style` selector?
+        matches = reStyleSelector.exec(s);
+        if ( matches !== null ) {
+            return isValidCSSSelector(matches[1]);
+        }
+        // Special `script:` filter?
         if ( s.startsWith('script') ) {
             if ( s.startsWith('?', 6) || s.startsWith('+', 6) ) {
                 return true;
@@ -836,8 +926,13 @@ FilterContainer.prototype.compileGenericSelector = function(parsed, out) {
         return;
     }
 
-    // All else
-    out.push('c\vhhg0\v' + selector);
+    // All else: high-high generics.
+    // Distinguish simple vs complex selectors.
+    if ( selector.indexOf(' ') === -1 ) {
+        out.push('c\vhhsg0\v' + selector);
+    } else {
+        out.push('c\vhhcg0\v' + selector);
+    }
 };
 
 FilterContainer.prototype.reClassOrIdSelector = /^[#.][\w-]+$/;
@@ -924,7 +1019,7 @@ FilterContainer.prototype.fromCompiledContent = function(text, lineBeg, skip) {
 
         fields = line.split('\v');
 
-        // h	ir	twitter.com	.promoted-tweet
+        // h  [\t]  ir  [\t]  twitter.com  [\t]  .promoted-tweet
         if ( fields[0] === 'h' ) {
             // Special filter: script tags. Not a real CSS selector.
             if ( fields[3].startsWith('script') ) {
@@ -943,8 +1038,8 @@ FilterContainer.prototype.fromCompiledContent = function(text, lineBeg, skip) {
             continue;
         }
 
-        // lg	105	.largeAd
-        // lg+	2jx	.Mpopup + #Mad > #MadZone
+        // lg  [\t]  105  [\t]  .largeAd
+        // lg+  [\t]  2jx  [\t]  .Mpopup + #Mad > #MadZone
         if ( fields[0] === 'lg' || fields[0] === 'lg+' ) {
             filter = fields[0] === 'lg' ?
                         filterPlain :
@@ -960,7 +1055,7 @@ FilterContainer.prototype.fromCompiledContent = function(text, lineBeg, skip) {
             continue;
         }
 
-        // entity	selector
+        // entity  [\t]  selector
         if ( fields[0] === 'e' ) {
             // Special filter: script tags. Not a real CSS selector.
             if ( fields[2].startsWith('script') ) {
@@ -996,9 +1091,15 @@ FilterContainer.prototype.fromCompiledContent = function(text, lineBeg, skip) {
             continue;
         }
 
-        if ( fields[0] === 'hhg0' ) {
-            this.highHighGenericHideArray.push(fields[1]);
-            this.highHighGenericHideCount += 1;
+        if ( fields[0] === 'hhsg0' ) {
+            this.highHighSimpleGenericHideArray.push(fields[1]);
+            this.highHighSimpleGenericHideCount += 1;
+            continue;
+        }
+
+        if ( fields[0] === 'hhcg0' ) {
+            this.highHighComplexGenericHideArray.push(fields[1]);
+            this.highHighComplexGenericHideCount += 1;
             continue;
         }
 
@@ -1145,11 +1246,17 @@ FilterContainer.prototype.retrieveScriptTags = function(domain, hostname) {
 FilterContainer.prototype.freeze = function() {
     this.duplicateBuster = {};
 
-    if ( this.highHighGenericHide !== '' ) {
-        this.highHighGenericHideArray.unshift(this.highHighGenericHide);
+    if ( this.highHighSimpleGenericHide !== '' ) {
+        this.highHighSimpleGenericHideArray.unshift(this.highHighSimpleGenericHide);
     }
-    this.highHighGenericHide = this.highHighGenericHideArray.join(',\n');
-    this.highHighGenericHideArray = [];
+    this.highHighSimpleGenericHide = this.highHighSimpleGenericHideArray.join(',\n');
+    this.highHighSimpleGenericHideArray = [];
+
+    if ( this.highHighComplexGenericHide !== '' ) {
+        this.highHighComplexGenericHideArray.unshift(this.highHighComplexGenericHide);
+    }
+    this.highHighComplexGenericHide = this.highHighComplexGenericHideArray.join(',\n');
+    this.highHighComplexGenericHideArray = [];
 
     this.parser.reset();
     this.frozen = true;
@@ -1193,8 +1300,10 @@ FilterContainer.prototype.toSelfie = function() {
         highLowGenericHideCount: this.highLowGenericHideCount,
         highMediumGenericHide: this.highMediumGenericHide,
         highMediumGenericHideCount: this.highMediumGenericHideCount,
-        highHighGenericHide: this.highHighGenericHide,
-        highHighGenericHideCount: this.highHighGenericHideCount,
+        highHighSimpleGenericHide: this.highHighSimpleGenericHide,
+        highHighSimpleGenericHideCount: this.highHighSimpleGenericHideCount,
+        highHighComplexGenericHide: this.highHighComplexGenericHide,
+        highHighComplexGenericHideCount: this.highHighComplexGenericHideCount,
         genericDonthide: this.genericDonthide,
         scriptTagFilters: this.scriptTagFilters,
         scriptTagFilterCount: this.scriptTagFilterCount,
@@ -1257,8 +1366,10 @@ FilterContainer.prototype.fromSelfie = function(selfie) {
     this.highLowGenericHideCount = selfie.highLowGenericHideCount;
     this.highMediumGenericHide = selfie.highMediumGenericHide;
     this.highMediumGenericHideCount = selfie.highMediumGenericHideCount;
-    this.highHighGenericHide = selfie.highHighGenericHide;
-    this.highHighGenericHideCount = selfie.highHighGenericHideCount;
+    this.highHighSimpleGenericHide = selfie.highHighSimpleGenericHide;
+    this.highHighSimpleGenericHideCount = selfie.highHighSimpleGenericHideCount;
+    this.highHighComplexGenericHide = selfie.highHighComplexGenericHide;
+    this.highHighComplexGenericHideCount = selfie.highHighComplexGenericHideCount;
     this.genericDonthide = selfie.genericDonthide;
     this.scriptTagFilters = selfie.scriptTagFilters;
     this.scriptTagFilterCount = selfie.scriptTagFilterCount;
@@ -1389,11 +1500,11 @@ FilterContainer.prototype.retrieveGenericSelectors = function(request) {
             hideLowCount: this.highLowGenericHideCount,
             hideMedium: this.highMediumGenericHide,
             hideMediumCount: this.highMediumGenericHideCount,
-            hideHigh: this.highHighGenericHide,
-            hideHighCount: this.highHighGenericHideCount
+            hideHighSimple: this.highHighSimpleGenericHide,
+            hideHighSimpleCount: this.highHighSimpleGenericHideCount,
+            hideHighComplex: this.highHighComplexGenericHide,
+            hideHighComplexCount: this.highHighComplexGenericHideCount
         };
-        // https://github.com/chrisaljoudi/uBlock/issues/497
-        r.donthide = this.genericDonthide;
     }
 
     var hideSelectors = r.hide;
@@ -1437,13 +1548,16 @@ FilterContainer.prototype.retrieveDomainSelectors = function(request) {
     // r.ready will tell the content script the cosmetic filtering engine is
     // up and ready.
 
+    // https://github.com/chrisaljoudi/uBlock/issues/497
+    // Generic exception filters are to be applied on all pages.
+
     var r = {
         ready: this.frozen,
         domain: domain,
         entity: pos === -1 ? domain : domain.slice(0, pos - domain.length),
         skipCosmeticFiltering: this.acceptedCount === 0,
         cosmeticHide: [],
-        cosmeticDonthide: [],
+        cosmeticDonthide: this.genericDonthide.slice(),
         netHide: [],
         netCollapse: µb.userSettings.collapseBlocked,
         scripts: this.retrieveScriptTags(domain, hostname)
