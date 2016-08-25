@@ -42,6 +42,10 @@ vAPI.firefox = true;
 vAPI.fennec = Services.appinfo.ID === '{aa3c5121-dab2-40e2-81ca-7ea25febc110}';
 vAPI.thunderbird = Services.appinfo.ID === '{3550f703-e582-4d05-9a08-453d09bdfdc6}';
 
+if ( vAPI.fennec ) {
+    vAPI.battery = true;
+}
+
 /******************************************************************************/
 
 var deferUntil = function(testFn, mainFn, details) {
@@ -240,6 +244,7 @@ vAPI.browserSettings = {
                 // https://bugzilla.mozilla.org/show_bug.cgi?id=814169
                 // Sigh.
                 this.rememberOriginalValue('network.http', 'speculative-parallel-limit');
+                this.rememberOriginalValue('network.dns', 'disablePrefetch');
                 // https://github.com/gorhill/uBlock/issues/292
                 // "true" means "do not disable", i.e. leave entry alone
                 if ( settingVal ) {
@@ -621,12 +626,29 @@ vAPI.storage = (function() {
 // This must be executed/setup early.
 
 var winWatcher = (function() {
-    var chromeWindowType = vAPI.thunderbird ? 'mail:3pane' : 'navigator:browser';
     var windowToIdMap = new Map();
     var windowIdGenerator = 1;
     var api = {
         onOpenWindow: null,
         onCloseWindow: null
+    };
+
+    // https://github.com/gorhill/uMatrix/issues/586
+    // This is necessary hack because on SeaMonkey 2.40, for unknown reasons
+    // private windows do not have the attribute `windowtype` set to
+    // `navigator:browser`. As a fallback, the code here will also test whether
+    // the id attribute is `main-window`.
+    api.toBrowserWindow = function(win) {
+        var docElement = win && win.document && win.document.documentElement;
+        if ( !docElement ) {
+            return null;
+        }
+        if ( vAPI.thunderbird ) {
+            return docElement.getAttribute('windowtype') === 'mail:3pane' ? win : null;
+        }
+        return docElement.getAttribute('windowtype') === 'navigator:browser' ||
+               docElement.getAttribute('id') === 'main-window' ?
+               win : null;
     };
 
     api.getWindows = function() {
@@ -638,7 +660,7 @@ var winWatcher = (function() {
     };
 
     api.getCurrentWindow = function() {
-        return Services.wm.getMostRecentWindow(chromeWindowType) || null;
+        return this.toBrowserWindow(Services.wm.getMostRecentWindow(null));
     };
 
     var addWindow = function(win) {
@@ -978,7 +1000,8 @@ vAPI.tabs.open = function(details) {
 
     if ( vAPI.fennec ) {
         tabBrowser.addTab(details.url, {
-            selected: details.active !== false
+            selected: details.active !== false,
+            parentId: tabBrowser.selectedTab.id
         });
         // Note that it's impossible to move tabs on Fennec, so don't bother
         return;
@@ -1366,8 +1389,7 @@ var tabWatcher = (function() {
             return false;
         }
 
-        var docElement = document.documentElement;
-        return docElement && docElement.getAttribute('windowtype') === 'navigator:browser';
+        return winWatcher.toBrowserWindow(window) !== null;
     };
 
     var onWindowLoad = function(win) {
@@ -1995,7 +2017,7 @@ var httpObserver = {
             }
         }
         bucket = this.pendingURLToIndex.get(url);
-        this.pendingURLToIndex.set(url, bucket === undefined ? si : bucket + si);
+        this.pendingURLToIndex.set(url, bucket === undefined ? si : si + bucket);
         preq._key = url;
         return preq;
     },
@@ -2072,19 +2094,7 @@ var httpObserver = {
     },
 
     // https://github.com/gorhill/uBlock/issues/959
-    //   Try to synthesize a pending request from a behind-the-scene request.
-    synthesizePendingRequest: function(channel, rawtype) {
-        var tabId = this.tabIdFromChannel(channel);
-        if ( tabId === vAPI.noTabId ) {
-            return null;
-        }
-        return {
-            frameId: 0,
-            parentFrameId: -1,
-            tabId: tabId,
-            rawtype: rawtype
-        };
-    },
+    syntheticPendingRequest: { frameId: 0, parentFrameId: -1, tabId: '', rawtype: 1 },
 
     handleRequest: function(channel, URI, details) {
         var type = this.typeMap[details.rawtype] || 'other';
@@ -2216,8 +2226,15 @@ var httpObserver = {
         var pendingRequest = this.lookupPendingRequest(URI.spec);
 
         // https://github.com/gorhill/uMatrix/issues/390#issuecomment-155759004
-        var rawtype = 1;
-        var loadInfo = channel.loadInfo;
+        var loadInfo = channel.loadInfo,
+            rawtype = 1,
+            frameId = 0,
+            parentFrameId = -1;
+
+        // https://bugzilla.mozilla.org/show_bug.cgi?id=1232354
+        // https://dxr.mozilla.org/mozilla-central/source/toolkit/modules/addons/WebRequest.jsm#537-553
+        // For modern Firefox, loadInfo contains the information about the
+        // context of the network request.
         if ( loadInfo ) {
             rawtype = loadInfo.externalContentPolicyType !== undefined ?
                 loadInfo.externalContentPolicyType :
@@ -2225,40 +2242,38 @@ var httpObserver = {
             if ( !rawtype ) {
                 rawtype = 1;
             }
-        }
-
-        // IMPORTANT:
-        // If this is a main frame, ensure that the proper tab id is being
-        // used: it can happen that the wrong tab id was looked up at
-        // `shouldLoadListener` time. Without this, the popup blocker may
-        // not work properly, and also a tab opened from a link may end up
-        // being wrongly reported as an embedded element.
-        if ( pendingRequest !== null && pendingRequest.rawtype === 6 ) {
-            var tabId = this.tabIdFromChannel(channel);
-            if ( tabId !== vAPI.noTabId ) {
-                pendingRequest.tabId = tabId;
+            frameId = loadInfo.frameOuterWindowID ? loadInfo.frameOuterWindowID : loadInfo.outerWindowID;
+            parentFrameId = loadInfo.frameOuterWindowID ? loadInfo.outerWindowID : loadInfo.parentOuterWindowID;
+            if ( frameId === parentFrameId ) {
+                parentFrameId = -1;
             }
         }
 
-        // Behind-the-scene request... Really?
-        if ( pendingRequest === null ) {
-            pendingRequest = this.synthesizePendingRequest(channel, rawtype);
-        }
-
-        // Behind-the-scene request... Yes, really.
-        if ( pendingRequest === null ) {
-            pendingRequest = {
-                frameId: 0,
-                parentFrameId: -1,
-                tabId: vAPI.noTabId,
-                rawtype: rawtype
-            };
-        }
-
-        // https://github.com/gorhill/uBlock/issues/654
-        // Use the request type from the HTTP observer point of view.
-        if ( rawtype !== 1 ) {
+        if ( pendingRequest !== null ) {
+            // https://github.com/gorhill/uBlock/issues/654
+            //   Use the request type from the HTTP observer point of view.
+            if ( rawtype !== 1 ) {
+                pendingRequest.rawtype = rawtype;
+            }
+            // IMPORTANT:
+            // If this is a main frame, ensure that the proper tab id is being
+            // used: it can happen that the wrong tab id was looked up at
+            // `shouldLoadListener` time. Without this, the popup blocker may
+            // not work properly, and also a tab opened from a link may end up
+            // being wrongly reported as an embedded element.
+            if ( pendingRequest.rawtype === 6 ) {
+                var tabId = this.tabIdFromChannel(channel);
+                if ( tabId !== vAPI.noTabId ) {
+                    pendingRequest.tabId = tabId;
+                }
+            }
+        } else { // pendingRequest === null
+            // No matching pending request found, synthetize one.
+            pendingRequest = this.syntheticPendingRequest;
+            pendingRequest.tabId = this.tabIdFromChannel(channel);
             pendingRequest.rawtype = rawtype;
+            pendingRequest.frameId = frameId;
+            pendingRequest.parentFrameId = parentFrameId;
         }
 
         if ( this.handleRequest(channel, URI, pendingRequest) ) {
@@ -2384,8 +2399,8 @@ vAPI.net.registerListeners = function() {
         // request into a ring buffer for later retrieval by the HTTP observer.
         var pendingReq = httpObserver.createPendingRequest(details.url);
         pendingReq.frameId = details.frameId;
-        pendingReq.parentFrameId = details.parentFrameId;
-        pendingReq.rawtype = details.rawtype;
+        pendingReq.parentFrameId = details.pFrameId;
+        pendingReq.rawtype = details.type;
         pendingReq.tabId = tabWatcher.tabIdFromTarget(e.target);
     };
 

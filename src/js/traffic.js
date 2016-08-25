@@ -77,10 +77,9 @@ var onBeforeRequest = function(details) {
     // > the outer frame.
     // > (ref: https://developer.chrome.com/extensions/webRequest)
     var isFrame = requestType === 'sub_frame';
-    var frameId = isFrame ? details.parentFrameId : details.frameId;
 
     // https://github.com/chrisaljoudi/uBlock/issues/114
-    var requestContext = pageStore.createContextFromFrameId(frameId);
+    var requestContext = pageStore.createContextFromFrameId(isFrame ? details.parentFrameId : details.frameId);
 
     // Setup context and evaluate
     var requestURL = details.url;
@@ -109,9 +108,8 @@ var onBeforeRequest = function(details) {
     // Not blocked
     if ( µb.isAllowResult(result) ) {
         // https://github.com/chrisaljoudi/uBlock/issues/114
-        frameId = details.frameId;
-        if ( frameId > 0 && isFrame ) {
-            pageStore.setFrame(frameId, requestURL);
+        if ( details.parentFrameId !== -1 && isFrame ) {
+            pageStore.setFrame(details.frameId, requestURL);
         }
         requestContext.dispose();
         return;
@@ -613,7 +611,13 @@ var foilInlineScripts = function(headers) {
     //   Since we are modifying an existing CSP header, we need to strip out
     //   'report-uri' if it is present, to prevent spurious reporting of CSP
     //   violation, and thus the leakage of information to the remote site.
-    csp = csp.replace(reScriptsrc, '') + scriptsrc.replace(reUnsafeinline, '');
+    csp = csp.replace(reScriptsrc, '').trim();
+    // https://github.com/gorhill/uBlock/issues/1909
+    //   Add missing `;` if needed.
+    if ( csp !== '' && csp.slice(-1) !== ';' ) {
+        csp += '; ';
+    }
+    csp += scriptsrc.replace(reUnsafeinline, '').trim();
     headers.push({
         'name': 'Content-Security-Policy',
         'value': csp.replace(reReporturi, '')

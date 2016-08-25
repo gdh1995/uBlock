@@ -94,6 +94,7 @@ var contentObserver = {
     popupMessageName: hostName + ':shouldLoadPopup',
     ignoredPopups: new WeakMap(),
     uniqueSandboxId: 1,
+    canE10S: Services.vc.compare(Services.appinfo.platformVersion, '44') > 0,
 
     get componentRegistrar() {
         return Components.manager.QueryInterface(Ci.nsIComponentRegistrar);
@@ -206,16 +207,19 @@ var contentObserver = {
         // - Enable uBlock
         // - Services and all other global variables are undefined
         // Hopefully will eventually understand why this happens.
-        if ( Services === undefined ) {
-            return this.ACCEPT;
-        }
-
-        if ( !context ) {
+        if ( Services === undefined || !context ) {
             return this.ACCEPT;
         }
 
         if ( type === this.MAIN_FRAME ) {
             this.handlePopup(location, origin, context);
+        }
+
+        // https://bugzilla.mozilla.org/show_bug.cgi?id=1232354
+        // For modern versions of Firefox, the frameId/parentFrameId
+        // information can be found in channel.loadInfo of the HTTP observer.
+        if ( this.canE10S ) {
+            return this.ACCEPT;
         }
 
         if ( !location.schemeIs('http') && !location.schemeIs('https') ) {
@@ -230,20 +234,18 @@ var contentObserver = {
             context = (context.ownerDocument || context).defaultView;
         }
 
+        // https://github.com/gorhill/uBlock/issues/1893
+        // I don't know why this happens. I observed that when it occurred, the
+        // resource was not seen by the HTTP observer, as if it was a spurious
+        // call to shouldLoad().
+        if ( !context ) {
+            return this.ACCEPT;
+        }
+
         // The context for the toolbar popup is an iframe element here,
         // so check context.top instead of context
         if ( !context.top || !context.location ) {
             return this.ACCEPT;
-        }
-
-        let isTopLevel = context === context.top;
-        let parentFrameId;
-        if ( isTopLevel ) {
-            parentFrameId = -1;
-        } else if ( context.parent === context.top ) {
-            parentFrameId = 0;
-        } else {
-            parentFrameId = this.getFrameId(context.parent);
         }
 
         let messageManager = getMessageManager(context);
@@ -251,25 +253,36 @@ var contentObserver = {
             return this.ACCEPT;
         }
 
-        let details = {
-            frameId: isTopLevel ? 0 : this.getFrameId(context),
-            parentFrameId: parentFrameId,
-            rawtype: type,
-            tabId: '',
-            url: location.spec
-        };
+        let isTopContext = context === context.top;
+        var parentFrameId;
+        if ( isTopContext ) {
+            parentFrameId = -1;
+        } else if ( context.parent === context.top ) {
+            parentFrameId = 0;
+        } else {
+            parentFrameId = this.getFrameId(context.parent);
+        }
+
+        let rpcData = this.rpcData;
+        rpcData.frameId = isTopContext ? 0 : this.getFrameId(context);
+        rpcData.pFrameId = parentFrameId;
+        rpcData.type = type;
+        rpcData.url = location.spec;
 
         //console.log('shouldLoad: type=' + type + ' url=' + location.spec);
         if ( typeof messageManager.sendRpcMessage === 'function' ) {
             // https://bugzil.la/1092216
-            messageManager.sendRpcMessage(this.cpMessageName, details);
+            messageManager.sendRpcMessage(this.cpMessageName, rpcData);
         } else {
             // Compatibility for older versions
-            messageManager.sendSyncMessage(this.cpMessageName, details);
+            messageManager.sendSyncMessage(this.cpMessageName, rpcData);
         }
 
         return this.ACCEPT;
     },
+
+    // Reuse object to avoid repeated memory allocation.
+    rpcData: { frameId: 0, pFrameId: -1, type: 0, url: '' },
 
     initContentScripts: function(win, create) {
         let messager = getMessageManager(win);
@@ -452,10 +465,7 @@ var contentObserver = {
             let doc = e.target;
             doc.removeEventListener(e.type, docReady, true);
 
-            if (
-                doc.querySelector('a[href^="abp:"],a[href^="https://subscribe.adblockplus.org/?"]') ||
-                loc.href === 'https://github.com/gorhill/uBlock/wiki/Filter-lists-from-around-the-web'
-            ) {
+            if ( doc.querySelector('a[href^="abp:"],a[href^="https://subscribe.adblockplus.org/?"]') ) {
                 lss(this.contentBaseURI + 'scriptlets/subscriber.js', sandbox);
             }
         };

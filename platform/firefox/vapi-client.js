@@ -23,13 +23,13 @@
    addMessageListener, removeMessageListener, sendAsyncMessage, outerShutdown
  */
 
+'use strict';
+
 // For non background pages
 
 /******************************************************************************/
 
 (function(self) {
-
-'use strict';
 
 // https://github.com/chrisaljoudi/uBlock/issues/464
 if ( document instanceof HTMLDocument === false ) {
@@ -53,6 +53,18 @@ self.rpc = self.rpc || function(){};
 /******************************************************************************/
 
 var vAPI = self.vAPI = self.vAPI || {};
+
+/******************************************************************************/
+
+var referenceCounter = 0;
+
+vAPI.lock = function() {
+    referenceCounter += 1;
+};
+
+vAPI.unlock = function() {
+    referenceCounter -= 1;
+};
 
 /******************************************************************************/
 
@@ -102,8 +114,13 @@ vAPI.executionCost.start();
 /******************************************************************************/
 
 vAPI.firefox = true;
-vAPI.sessionId = String.fromCharCode(Date.now() % 26 + 97) +
-    Math.random().toString(36).slice(2);
+
+vAPI.randomToken = function() {
+    return String.fromCharCode(Date.now() % 26 + 97) +
+           Math.floor(Math.random() * 982451653 + 982451653).toString(36);
+};
+
+vAPI.sessionId = vAPI.randomToken();
 
 /******************************************************************************/
 

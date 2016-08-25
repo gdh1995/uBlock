@@ -47,7 +47,10 @@ if ( document instanceof HTMLDocument === false ) {
 // https://github.com/gorhill/uBlock/issues/1124
 // Looks like `contentType` is on track to be standardized:
 //   https://dom.spec.whatwg.org/#concept-document-content-type
-if ( (document.contentType || '').lastIndexOf('image/', 0) === 0 ) {
+// https://forums.lanik.us/viewtopic.php?f=64&t=31522
+//   Skip text/plain documents.
+var contentType = document.contentType || '';
+if ( /^image\/|^text\/plain/.test(contentType) ) {
     return; 
 }
 
@@ -61,6 +64,23 @@ var chrome = self.chrome;
 if ( vAPI.sessionId ) {
     return;
 }
+
+/******************************************************************************/
+
+var referenceCounter = 0;
+
+vAPI.lock = function() {
+    referenceCounter += 1;
+};
+
+vAPI.unlock = function() {
+    referenceCounter -= 1;
+    if ( referenceCounter === 0 ) {
+        // Eventually there will be code here to flush the javascript code
+        // from this file out of memory when it ends up unused.
+        
+    }
+};
 
 /******************************************************************************/
 
@@ -111,8 +131,12 @@ vAPI.executionCost.start();
 
 /******************************************************************************/
 
-vAPI.sessionId = String.fromCharCode(Date.now() % 26 + 97) +
-                 Math.random().toString(36).slice(2);
+vAPI.randomToken = function() {
+    return String.fromCharCode(Date.now() % 26 + 97) +
+           Math.floor(Math.random() * 982451653 + 982451653).toString(36);
+};
+
+vAPI.sessionId = vAPI.randomToken();
 vAPI.chrome = true;
 vAPI.setTimeout = vAPI.setTimeout || self.setTimeout.bind(self);
 
