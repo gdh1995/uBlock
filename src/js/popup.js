@@ -239,7 +239,7 @@ var updateFirewallCell = function(scope, des, type, rule) {
         cell.toggleClass(action + 'Rule', true);
     }
 
-    // Use dark shade visual cue if the filter is specific to the cell.
+    // Use dark shade visual cue if the rule is specific to the cell.
     var ownRule = false;
     var matches = reSrcHostnameFromRule.exec(rule);
     if ( matches !== null ) {
@@ -571,8 +571,6 @@ var gotoURL = function(ev) {
 
     ev.preventDefault();
 
-    var rel = this.getAttribute('rel') || '';
-
     messaging.send(
         'popupPanel',
         {
@@ -581,7 +579,7 @@ var gotoURL = function(ev) {
                 url: this.getAttribute('href'),
                 select: true,
                 index: -1,
-                popup: rel === 'popup' && ev.shiftKey
+                shiftKey: ev.shiftKey
             }
         }
     );
