@@ -1,7 +1,7 @@
 /*******************************************************************************
 
     uBlock Origin - a browser extension to block requests.
-    Copyright (C) 2014-2016 Raymond Hill
+    Copyright (C) 2014-2017 Raymond Hill
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -194,9 +194,7 @@ var matchBucket = function(url, hostname, bucket, start) {
 
 µBlock.whitelistFromString = function(s) {
     var whitelist = Object.create(null),
-        reInvalidHostname = /[^a-z0-9.\-\[\]:]/,
-        reHostnameExtractor = /([a-z0-9\[][a-z0-9.\-]*[a-z0-9\]])(?::[\d*]+)?\/(?:[^\x00-\x20\/]|$)[^\x00-\x20]*$/,
-        lines = s.split(/[\n\r]+/),
+        lineIter = new this.LineIterator(s),
         line, matches, key, directive, re;
 
     // Comment bucket must always be ready to be used.
@@ -205,8 +203,9 @@ var matchBucket = function(url, hostname, bucket, start) {
     // New set of directives, scrap cached data.
     directiveToRegexpMap.clear();
 
-    for ( var i = 0; i < lines.length; i++ ) {
-        line = lines[i].trim();
+    while ( !lineIter.eot() ) {
+        line = lineIter.next().trim();
+
         // https://github.com/gorhill/uBlock/issues/171
         // Skip empty lines
         if ( line === '' ) {
@@ -228,7 +227,7 @@ var matchBucket = function(url, hostname, bucket, start) {
             }
         }
         // Regex-based (ensure it is valid)
-        else if ( line.startsWith('/') && line.endsWith('/') ) {
+        else if ( line.length > 2 && line.startsWith('/') && line.endsWith('/') ) {
             key = '//';
             directive = line;
             try {
@@ -267,6 +266,28 @@ var matchBucket = function(url, hostname, bucket, start) {
     return whitelist;
 };
 
+µBlock.validateWhitelistString = function(s) {
+    var lineIter = new this.LineIterator(s), line;
+    while ( !lineIter.eot() ) {
+        line = lineIter.next().trim();
+        if ( line === '' ) { continue; }
+        if ( line.startsWith('#') ) { continue; } // Comment
+        if ( line.indexOf('/') === -1 ) { // Plain hostname
+            if ( reInvalidHostname.test(line) ) { return false; }
+            continue;
+        }
+        if ( line.length > 2 && line.startsWith('/') && line.endsWith('/') ) { // Regex-based
+            try { new RegExp(line.slice(1, -1)); } catch(ex) { return false; }
+            continue;
+        }
+        if ( reHostnameExtractor.test(line) === false ) { return false; } // URL
+    }
+    return true;
+};
+
+var reInvalidHostname = /[^a-z0-9.\-\[\]:]/,
+    reHostnameExtractor = /([a-z0-9\[][a-z0-9.\-]*[a-z0-9\]])(?::[\d*]+)?\/(?:[^\x00-\x20\/]|$)[^\x00-\x20]*$/;
+
 /******************************************************************************/
 
 })();
@@ -283,6 +304,7 @@ var matchBucket = function(url, hostname, bucket, start) {
         us.noCosmeticFiltering = this.hnSwitches.evaluate('no-cosmetic-filtering', '*') === 1;
         us.noLargeMedia = this.hnSwitches.evaluate('no-large-media', '*') === 1;
         us.noRemoteFonts = this.hnSwitches.evaluate('no-remote-fonts', '*') === 1;
+        us.noCSPReports = this.hnSwitches.evaluate('no-csp-reports', '*') === 1;
         return us;
     }
 
@@ -319,6 +341,9 @@ var matchBucket = function(url, hostname, bucket, start) {
             us.dynamicFilteringEnabled = true;
         }
         break;
+    case 'autoUpdate':
+        this.scheduleAssetUpdater(value ? 7 * 60 * 1000 : 0);
+        break;
     case 'collapseBlocked':
         if ( value === false ) {
             this.cosmeticFilteringEngine.removeFromSelectorCache('*', 'net');
@@ -344,6 +369,11 @@ var matchBucket = function(url, hostname, bucket, start) {
             this.saveHostnameSwitches();
         }
         break;
+    case 'noCSPReports':
+        if ( this.hnSwitches.toggle('no-csp-reports', '*', value ? 1 : 0) ) {
+            this.saveHostnameSwitches();
+        }
+        break;
     case 'prefetchingDisabled':
         if ( this.privacySettingsSupported ) {
             vAPI.browserSettings.set({ 'prefetching': !value });
@@ -365,11 +395,12 @@ var matchBucket = function(url, hostname, bucket, start) {
 
 /******************************************************************************/
 
-µBlock.elementPickerExec = function(tabId, targetElement) {
+µBlock.elementPickerExec = function(tabId, targetElement, zap) {
     if ( vAPI.isBehindTheSceneTabId(tabId) ) {
         return;
     }
     this.epickerTarget = targetElement || '';
+    this.epickerZap = zap || false;
     this.scriptlets.inject(tabId, 'element-picker');
     if ( typeof vAPI.tabs.select === 'function' ) {
         vAPI.tabs.select(tabId);
@@ -451,18 +482,6 @@ var matchBucket = function(url, hostname, bucket, start) {
 
 /******************************************************************************/
 
-µBlock.isBlockResult = function(result) {
-    return typeof result === 'string' && result.charCodeAt(1) === 98 /* 'b' */;
-};
-
-/******************************************************************************/
-
-µBlock.isAllowResult = function(result) {
-    return typeof result !== 'string' || result.charCodeAt(1) !== 98 /* 'b' */;
-};
-
-/******************************************************************************/
-
 µBlock.toggleHostnameSwitch = function(details) {
     if ( this.hnSwitches.toggleZ(details.name, details.hostname, !!details.deep, details.state) ) {
         this.saveHostnameSwitches();
@@ -477,11 +496,9 @@ var matchBucket = function(url, hostname, bucket, start) {
         );
         break;
     case 'no-large-media':
-        if ( details.state === false ) {
-            var pageStore = this.pageStoreFromTabId(details.tabId);
-            if ( pageStore !== null ) {
-                pageStore.temporarilyAllowLargeMediaElements();
-            }
+        var pageStore = this.pageStoreFromTabId(details.tabId);
+        if ( pageStore !== null ) {
+            pageStore.temporarilyAllowLargeMediaElements(!details.state);
         }
         break;
     }
@@ -513,7 +530,7 @@ var matchBucket = function(url, hostname, bucket, start) {
 /******************************************************************************/
 
 µBlock.scriptlets = (function() {
-    var pendingEntries = Object.create(null);
+    var pendingEntries = new Map();
 
     var Entry = function(tabId, scriptlet, callback) {
         this.tabId = tabId;
@@ -525,8 +542,9 @@ var matchBucket = function(url, hostname, bucket, start) {
     Entry.prototype.service = function(response) {
         if ( this.timer !== null ) {
             clearTimeout(this.timer);
+            this.timer = null;
         }
-        delete pendingEntries[makeKey(this.tabId, this.scriptlet)];
+        pendingEntries.delete(makeKey(this.tabId, this.scriptlet));
         this.callback(response);
     };
 
@@ -536,10 +554,8 @@ var matchBucket = function(url, hostname, bucket, start) {
 
     var report = function(tabId, scriptlet, response) {
         var key = makeKey(tabId, scriptlet);
-        var entry = pendingEntries[key];
-        if ( entry === undefined ) {
-            return;
-        }
+        var entry = pendingEntries.get(key);
+        if ( entry === undefined ) { return; }
         entry.service(response);
     };
 
@@ -549,20 +565,25 @@ var matchBucket = function(url, hostname, bucket, start) {
                 callback();
                 return;
             }
-            var key = makeKey(tabId, scriptlet);
-            if ( pendingEntries[key] !== undefined ) {
-                callback();
+            var key = makeKey(tabId, scriptlet),
+                entry = pendingEntries.get(key);
+            if ( entry !== undefined ) {
+                if ( callback !== entry.callback ) {
+                    callback();
+                }
                 return;
             }
-            pendingEntries[key] = new Entry(tabId, scriptlet, callback);
+            pendingEntries.set(key, new Entry(tabId, scriptlet, callback));
         }
-        vAPI.tabs.injectScript(tabId, { file: 'js/scriptlets/' + scriptlet + '.js' });
+        vAPI.tabs.injectScript(tabId, {
+            file: '/js/scriptlets/' + scriptlet + '.js'
+        });
     };
 
     // TODO: think about a callback mechanism.
     var injectDeep = function(tabId, scriptlet) {
         vAPI.tabs.injectScript(tabId, {
-            file: 'js/scriptlets/' + scriptlet + '.js',
+            file: '/js/scriptlets/' + scriptlet + '.js',
             allFrames: true
         });
     };

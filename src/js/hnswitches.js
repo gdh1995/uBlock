@@ -1,7 +1,7 @@
 /*******************************************************************************
 
     uBlock Origin - a Chromium browser extension to black/white list requests.
-    Copyright (C) 2015-2016 Raymond Hill
+    Copyright (C) 2015-2017 Raymond Hill
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -37,19 +37,12 @@ var HnSwitches = function() {
 /******************************************************************************/
 
 var switchBitOffsets = {
-       'no-strict-blocking': 0,
-                'no-popups': 2,
-    'no-cosmetic-filtering': 4,
-          'no-remote-fonts': 6,
-           'no-large-media': 8
-};
-
-var fromLegacySwitchNames = {
-           'dontBlockDoc': 'no-strict-blocking',
-       'doBlockAllPopups': 'no-popups',
-       'noStrictBlocking': 'no-strict-blocking',
-               'noPopups': 'no-popups',
-    'noCosmeticFiltering': 'no-cosmetic-filtering'
+       'no-strict-blocking':  0,
+                'no-popups':  2,
+    'no-cosmetic-filtering':  4,
+          'no-remote-fonts':  6,
+           'no-large-media':  8,
+           'no-csp-reports': 10
 };
 
 var switchStateToNameMap = {
@@ -249,18 +242,21 @@ HnSwitches.prototype.evaluateZ = function(switchName, hostname) {
 
 /******************************************************************************/
 
-HnSwitches.prototype.toResultString = function() {
-    return this.r !== 1 ?
-        '' :
-        'ub:' + this.n + ': ' + this.z + ' true';
+HnSwitches.prototype.toLogData = function() {
+    return {
+        source: 'switch',
+        result: this.r,
+        raw: this.n + ': ' + this.z + ' true'
+    };
 };
 
 /******************************************************************************/
 
 HnSwitches.prototype.toString = function() {
-    var out = [];
-    var switchName, val;
-    var hostname;
+    var out = [],
+        switchName, val,
+        hostname,
+        toUnicode = punycode.toUnicode;
     for ( hostname in this.switches ) {
         if ( this.switches.hasOwnProperty(hostname) === false ) {
             continue;
@@ -270,8 +266,9 @@ HnSwitches.prototype.toString = function() {
                 continue;
             }
             val = this.evaluate(switchName, hostname);
-            if ( val === 0 ) {
-                continue;
+            if ( val === 0 ) { continue; }
+            if ( hostname.indexOf('xn--') !== -1 ) {
+                hostname = toUnicode(hostname);
             }
             out.push(switchName + ': ' + hostname + ' ' + switchStateToNameMap[val]);
         }
@@ -282,25 +279,16 @@ HnSwitches.prototype.toString = function() {
 /******************************************************************************/
 
 HnSwitches.prototype.fromString = function(text) {
-    var textEnd = text.length;
-    var lineBeg = 0, lineEnd;
-    var line, pos;
-    var fields;
-    var switchName, hostname, state;
+    var lineIter = new µBlock.LineIterator(text),
+        line, pos, fields,
+        switchName, hostname, state,
+        reNotASCII = /[^\x20-\x7F]/,
+        toASCII = punycode.toASCII;
 
     this.reset();
 
-    while ( lineBeg < textEnd ) {
-        lineEnd = text.indexOf('\n', lineBeg);
-        if ( lineEnd < 0 ) {
-            lineEnd = text.indexOf('\r', lineBeg);
-            if ( lineEnd < 0 ) {
-                lineEnd = textEnd;
-            }
-        }
-        line = text.slice(lineBeg, lineEnd).trim();
-        lineBeg = lineEnd + 1;
-
+    while ( lineIter.eot() === false ) {
+        line = lineIter.next().trim();
         pos = line.indexOf('# ');
         if ( pos !== -1 ) {
             line = line.slice(0, pos).trim();
@@ -320,12 +308,16 @@ HnSwitches.prototype.fromString = function(text) {
             continue;
         }
         switchName = switchName.slice(0, pos);
-        switchName = fromLegacySwitchNames[switchName] || switchName;
         if ( switchBitOffsets.hasOwnProperty(switchName) === false ) {
             continue;
         }
 
-        hostname = punycode.toASCII(fields[1]);
+        // Performance: avoid punycoding if hostname is made only of
+        // ASCII characters.
+        hostname = fields[1];
+        if ( reNotASCII.test(hostname) ) {
+            hostname = toASCII(hostname);
+        }
 
         state = fields[2];
         if ( nameToSwitchStateMap.hasOwnProperty(state) === false ) {

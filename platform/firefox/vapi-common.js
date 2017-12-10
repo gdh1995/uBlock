@@ -1,7 +1,7 @@
 /*******************************************************************************
 
     uBlock Origin - a browser extension to block requests.
-    Copyright (C) 2014-2016 The uBlock Origin authors
+    Copyright (C) 2014-2017 The uBlock Origin authors
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -27,7 +27,7 @@
 
 /******************************************************************************/
 
-(function() {
+(function(self) {
 
 /******************************************************************************/
 
@@ -36,7 +36,12 @@ const {Services} = Components.utils.import(
     null
 );
 
-var vAPI = self.vAPI = self.vAPI || {};
+// https://bugs.chromium.org/p/project-zero/issues/detail?id=1225&desc=6#c10
+if ( !self.vAPI || self.vAPI.uBO !== true ) {
+    self.vAPI = { uBO: true };
+}
+
+var vAPI = self.vAPI;
 
 /******************************************************************************/
 
@@ -67,30 +72,6 @@ vAPI.download = function(details) {
     a.setAttribute('download', details.filename || '');
     a.dispatchEvent(new MouseEvent('click'));
 };
-
-/******************************************************************************/
-
-vAPI.insertHTML = (function() {
-    const parser = Components.classes['@mozilla.org/parserutils;1']
-        .getService(Components.interfaces.nsIParserUtils);
-
-    // https://github.com/gorhill/uBlock/issues/845
-    // Apparently dashboard pages execute with `about:blank` principal.
-
-    return function(node, html) {
-        while ( node.firstChild ) {
-            node.removeChild(node.firstChild);
-        }
-
-        node.appendChild(parser.parseFragment(
-            html,
-            parser.SanitizerAllowStyle,
-            false,
-            Services.io.newURI('about:blank', null, null),
-            document.documentElement
-        ));
-    };
-})();
 
 /******************************************************************************/
 
@@ -181,6 +162,6 @@ vAPI.localStorage.init('extensions.' + location.host + '.');
 
 /******************************************************************************/
 
-})();
+})(this);
 
 /******************************************************************************/

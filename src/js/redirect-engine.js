@@ -322,13 +322,10 @@ RedirectEngine.prototype.toSelfie = function() {
     // convert it to a serializable format. The serialized format must be
     // suitable to be used as an argument to the Map() constructor.
     var rules = [],
-        iter = this.rules.entries(),
-        item, rule, entries, i, entry;
-    for (;;) {
-        item = iter.next();
-        if ( item.done ) { break; }
-        rule = [ item.value[0], [] ];
-        entries = item.value[1];
+        rule, entries, i, entry;
+    for ( var item of this.rules ) {
+        rule = [ item[0], [] ];
+        entries = item[1];
         i = entries.length;
         while ( i-- ) {
             entry = entries[i];
@@ -341,11 +338,11 @@ RedirectEngine.prototype.toSelfie = function() {
     }
     var µb = µBlock;
     return {
-        resources: µb.mapToArray(this.resources),
+        resources: µb.arrayFrom(this.resources),
         rules: rules,
-        ruleTypes: µb.setToArray(this.ruleTypes),
-        ruleSources: µb.setToArray(this.ruleSources),
-        ruleDestinations: µb.setToArray(this.ruleDestinations)
+        ruleTypes: µb.arrayFrom(this.ruleTypes),
+        ruleSources: µb.arrayFrom(this.ruleSources),
+        ruleDestinations: µb.arrayFrom(this.ruleDestinations)
     };
 };
 
@@ -362,11 +359,10 @@ RedirectEngine.prototype.fromSelfie = function(selfie) {
     }
 
     // Rules.
-    var µb = µBlock;
-    this.rules = µb.mapFromArray(selfie.rules);
-    this.ruleTypes = µb.setFromArray(selfie.ruleTypes);
-    this.ruleSources = µb.setFromArray(selfie.ruleSources);
-    this.ruleDestinations = µb.setFromArray(selfie.ruleDestinations);
+    this.rules = new Map(selfie.rules);
+    this.ruleTypes = new Set(selfie.ruleTypes);
+    this.ruleSources = new Set(selfie.ruleSources);
+    this.ruleDestinations = new Set(selfie.ruleDestinations);
 
     return true;
 };
@@ -402,27 +398,15 @@ RedirectEngine.prototype.resourceContentFromName = function(name, mime) {
 // TODO: combine same key-redirect pairs into a single regex.
 
 RedirectEngine.prototype.resourcesFromString = function(text) {
-    var textEnd = text.length;
-    var lineBeg = 0, lineEnd;
-    var line, fields, encoded;
-    var reNonEmptyLine = /\S/;
+    var line, fields, encoded,
+        reNonEmptyLine = /\S/,
+        lineIter = new µBlock.LineIterator(text);
 
     this.resources = new Map();
 
-    while ( lineBeg < textEnd ) {
-        lineEnd = text.indexOf('\n', lineBeg);
-        if ( lineEnd < 0 ) {
-            lineEnd = text.indexOf('\r', lineBeg);
-            if ( lineEnd < 0 ) {
-                lineEnd = textEnd;
-            }
-        }
-        line = text.slice(lineBeg, lineEnd);
-        lineBeg = lineEnd + 1;
-
-        if ( line.startsWith('#') ) {
-            continue;
-        }
+    while ( lineIter.eot() === false ) {
+        line = lineIter.next();
+        if ( line.startsWith('#') ) { continue; }
 
         if ( fields === undefined ) {
             fields = line.trim().split(/\s+/);

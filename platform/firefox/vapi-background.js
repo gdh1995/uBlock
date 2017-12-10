@@ -1,7 +1,7 @@
 /*******************************************************************************
 
     uBlock Origin - a browser extension to block requests.
-    Copyright (C) 2014-2106 The uBlock Origin authors
+    Copyright (C) 2014-2107 The uBlock Origin authors
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -53,9 +53,9 @@ var deferUntil = function(testFn, mainFn, details) {
         details = {};
     }
 
-    var now = 0;
-    var next = details.next || 200;
-    var until = details.until || 2000;
+    var now = 0,
+        next = details.next || 200,
+        until = details.until || 12800;
 
     var check = function() {
         if ( testFn() === true || now >= until ) {
@@ -69,7 +69,7 @@ var deferUntil = function(testFn, mainFn, details) {
     if ( 'sync' in details && details.sync === true ) {
         check();
     } else {
-        vAPI.setTimeout(check, 1);
+        vAPI.setTimeout(check, details.first || 1);
     }
 };
 
@@ -274,7 +274,11 @@ vAPI.browserSettings = {
             // has a `media.peerconnection.ice.default_address_only` pref which
             // purpose is to prevent local IP address leakage.
             case 'webrtcIPAddress':
-                if ( this.getValue('media.peerconnection', 'ice.default_address_only') !== undefined ) {
+                // https://github.com/gorhill/uBlock/issues/2337
+                if ( this.getValue('media.peerconnection', 'ice.no_host') !== undefined ) {
+                    prefName = 'ice.no_host';
+                    prefVal = true;
+                } else if ( this.getValue('media.peerconnection', 'ice.default_address_only') !== undefined ) {
                     prefName = 'ice.default_address_only';
                     prefVal = true;
                 } else {
@@ -676,6 +680,12 @@ var winWatcher = (function() {
         if ( !win || windowToIdMap.delete(win) !== true ) {
             return;
         }
+        // https://github.com/uBlockOrigin/uAssets/issues/567
+        //   We need to cleanup if and only if the window being closed is
+        //   the actual top window.
+        if ( win.gBrowser && win.gBrowser.ownerGlobal !== win ) {
+            return;
+        }
         if ( typeof api.onCloseWindow === 'function' ) {
             api.onCloseWindow(win);
         }
@@ -963,6 +973,8 @@ vAPI.tabs.open = function(details) {
 
         for ( tab of this.getAll() ) {
             var browser = tabWatcher.browserFromTarget(tab);
+            // https://github.com/gorhill/uBlock/issues/2558
+            if ( browser === null ) { continue; }
 
             // Or simply .equals if we care about the fragment
             if ( URI.equalsExceptRef(browser.currentURI) === false ) {
@@ -1009,9 +1021,9 @@ vAPI.tabs.open = function(details) {
     // Open in a standalone window
     if ( details.popup === true ) {
         Services.ww.openWindow(
-            self,
+            win,
             details.url,
-            null,
+            'uBO-logger',
             'location=1,menubar=1,personalbar=1,resizable=1,toolbar=1',
             null
         );
@@ -1363,6 +1375,7 @@ var tabWatcher = (function() {
         } else if ( tabBrowser.tabContainer ) {     // Firefox
             tabContainer = tabBrowser.tabContainer;
             vAPI.contextMenu.register(window);
+            vAPI.commands.register(window);
         }
 
         // https://github.com/gorhill/uBlock/issues/697
@@ -1407,6 +1420,7 @@ var tabWatcher = (function() {
 
     var onWindowUnload = function(win) {
         vAPI.contextMenu.unregister(win);
+        vAPI.commands.unregister(win);
 
         var tabBrowser = getTabBrowser(win);
         if ( tabBrowser === null ) {
@@ -1558,31 +1572,22 @@ vAPI.messaging.listen = function(listenerName, callback) {
 
 vAPI.messaging.onMessage = (function() {
     var messaging = vAPI.messaging;
-    var toAuxPending = {};
 
     // Use a wrapper to avoid closure and to allow reuse.
-    var CallbackWrapper = function(messageManager, listenerId, channelName, auxProcessId, timeout) {
+    var CallbackWrapper = function(messageManager, listenerId, channelName, auxProcessId) {
         this.callback = this.proxy.bind(this); // bind once
-        this.init(messageManager, listenerId, channelName, auxProcessId, timeout);
+        this.init(messageManager, listenerId, channelName, auxProcessId);
     };
 
-    CallbackWrapper.prototype.init = function(messageManager, listenerId, channelName, auxProcessId, timeout) {
+    CallbackWrapper.prototype.init = function(messageManager, listenerId, channelName, auxProcessId) {
         this.messageManager = messageManager;
         this.listenerId = listenerId;
         this.channelName = channelName;
         this.auxProcessId = auxProcessId;
-        this.timerId = timeout !== undefined ?
-                            vAPI.setTimeout(this.callback, timeout) :
-                            null;
         return this;
     };
 
     CallbackWrapper.prototype.proxy = function(response) {
-        if ( this.timerId !== null ) {
-            clearTimeout(this.timerId);
-            delete toAuxPending[this.timerId];
-            this.timerId = null;
-        }
         var message = JSON.stringify({
             auxProcessId: this.auxProcessId,
             channelName: this.channelName,
@@ -1605,97 +1610,15 @@ vAPI.messaging.onMessage = (function() {
 
     var callbackWrapperJunkyard = [];
 
-    var callbackWrapperFactory = function(messageManager, listenerId, channelName, auxProcessId, timeout) {
+    var callbackWrapperFactory = function(messageManager, listenerId, channelName, auxProcessId) {
         var wrapper = callbackWrapperJunkyard.pop();
         if ( wrapper ) {
-            return wrapper.init(messageManager, listenerId, channelName, auxProcessId, timeout);
+            return wrapper.init(messageManager, listenerId, channelName, auxProcessId);
         }
-        return new CallbackWrapper(messageManager, listenerId, channelName, auxProcessId, timeout);
-    };
-
-    // "Auxiliary process": any process other than main process.
-    var toAux = function(target, details) {
-        var messageManagerFrom = target.messageManager;
-
-        // Message came from a popup, and its message manager is not usable.
-        // So instead we broadcast to the parent window.
-        if ( !messageManagerFrom ) {
-            messageManagerFrom = getOwnerWindow(
-                target.webNavigation.QueryInterface(Ci.nsIDocShell).chromeEventHandler
-            ).messageManager;
-        }
-
-        var wrapper;
-        if ( details.auxProcessId !== undefined ) {
-            var channelNameRaw = details.channelName;
-            var pos = channelNameRaw.indexOf('|');
-            wrapper = callbackWrapperFactory(
-                messageManagerFrom,
-                channelNameRaw.slice(0, pos),
-                channelNameRaw.slice(pos + 1),
-                details.auxProcessId,
-                1023
-            );
-        }
-
-        var messageManagerTo = null;
-        var browser = tabWatcher.browserFromTabId(details.toTabId);
-        if ( browser !== null && browser.messageManager ) {
-            messageManagerTo = browser.messageManager;
-        }
-        if ( messageManagerTo === null ) {
-            if ( wrapper !== undefined ) {
-                wrapper.callback();
-            }
-            return;
-        }
-
-        // As per HTML5, timer id is always an integer, thus suitable to be used
-        // as a key, and which value is safe to use across process boundaries.
-        if ( wrapper !== undefined ) {
-            toAuxPending[wrapper.timerId] = wrapper;
-        }
-
-        var targetId = location.host + ':broadcast';
-        var payload = JSON.stringify({
-            mainProcessId: wrapper && wrapper.timerId,
-            channelName: details.toChannel,
-            msg: details.msg
-        });
-
-        if ( messageManagerTo.sendAsyncMessage ) {
-            messageManagerTo.sendAsyncMessage(targetId, payload);
-        } else {
-            messageManagerTo.broadcastAsyncMessage(targetId, payload);
-        }
-    };
-
-    var toAuxResponse = function(details) {
-        var mainProcessId = details.mainProcessId;
-        if ( mainProcessId === undefined ) {
-            return;
-        }
-        if ( toAuxPending.hasOwnProperty(mainProcessId) === false ) {
-            return;
-        }
-        var wrapper = toAuxPending[mainProcessId];
-        delete toAuxPending[mainProcessId];
-        wrapper.callback(details.msg);
+        return new CallbackWrapper(messageManager, listenerId, channelName, auxProcessId);
     };
 
     return function({target, data}) {
-        // Auxiliary process to auxiliary process
-        if ( data.toTabId !== undefined ) {
-            toAux(target, data);
-            return;
-        }
-
-        // Auxiliary process to auxiliary process: response
-        if ( data.mainProcessId !== undefined ) {
-            toAuxResponse(data);
-            return;
-        }
-
         // Auxiliary process to main process
         var messageManager = target.messageManager;
 
@@ -1734,15 +1657,11 @@ vAPI.messaging.onMessage = (function() {
         if ( typeof listener === 'function' ) {
             r = listener(data.msg, sender, callback);
         }
-        if ( r !== messaging.UNHANDLED ) {
-            return;
-        }
+        if ( r !== messaging.UNHANDLED ) { return; }
 
         // Auxiliary process to main process: default handler
         r = messaging.defaultHandler(data.msg, sender, callback);
-        if ( r !== messaging.UNHANDLED ) {
-            return;
-        }
+        if ( r !== messaging.UNHANDLED ) { return; }
 
         // Auxiliary process to main process: no handler
         console.error('uBlock> messaging > unknown request: %o', data);
@@ -1900,6 +1819,7 @@ var httpObserver = {
         16: 'websocket',
         17: 'csp_report',
         19: 'beacon',
+        20: 'xmlhttprequest',
         21: 'image'
     },
     onBeforeRequest: function(){},
@@ -2361,44 +2281,51 @@ vAPI.net.registerListeners = function() {
     }
 
     var shouldLoadPopupListenerMessageName = location.host + ':shouldLoadPopup';
-    var shouldLoadPopupListener = function(openerURL, popupTabId) {
-        var uri, openerTabId;
-        for ( var browser of tabWatcher.browsers() ) {
-            uri = browser.currentURI;
+    var shouldLoadPopupListenerEntries = [];
+    var shouldLoadPopupListener = function(e) {
+        if ( typeof vAPI.tabs.onPopupCreated !== 'function' ) { return; }
 
-            // Probably isn't the best method to identify the source tab.
+        var target = e.target,
+            data = e.data,
+            now = Date.now(),
+            entries = shouldLoadPopupListenerEntries,
+            entry;
 
-            // https://github.com/gorhill/uBlock/issues/450
-            // Skip entry if no valid URI available.
-            // Apparently URI can be undefined under some circumstances: I
-            // believe this may have to do with those very temporary
-            // browser objects created when opening a new tab, i.e. related
-            // to https://github.com/gorhill/uBlock/issues/212
-            if ( !uri || uri.spec !== openerURL ) {
-                continue;
-            }
-
-            openerTabId = tabWatcher.tabIdFromTarget(browser);
-            if ( openerTabId !== popupTabId ) {
-                vAPI.tabs.onPopupCreated(popupTabId, openerTabId);
+        var i = entries.length;
+        while ( i-- ) {
+            entry = entries[i];
+            if ( entry.id === data.id ) {
+                entries.splice(i, 1);
                 break;
             }
+            if ( entry.expire <= now ) {
+                entries.splice(i, 1);
+            }
+            entry = undefined;
         }
-    };
-    var shouldLoadPopupListenerAsync = function(e) {
-        if ( typeof vAPI.tabs.onPopupCreated !== 'function' ) {
-            return;
+        if ( !entry ) {
+            entry = {
+                id: data.id,
+                popupTabId: undefined,
+                openerTabId: undefined,
+                expire: now + 10000
+            };
+            entries.push(entry);
         }
-        // We are handling a synchronous message: do not block.
-        vAPI.setTimeout(
-            shouldLoadPopupListener.bind(null, e.data, tabWatcher.tabIdFromTarget(e.target)),
-            1
-        );
+        var tabId = tabWatcher.tabIdFromTarget(target);
+        if ( data.popup ) {
+            entry.popupTabId = tabId;
+        } else /* if ( data.opener ) */ {
+            entry.openerTabId = tabId;
+        }
+        if ( entry.popupTabId && entry.openerTabId ) {
+            vAPI.tabs.onPopupCreated(entry.popupTabId, entry.openerTabId);
+        }
     };
 
     vAPI.messaging.globalMessageManager.addMessageListener(
         shouldLoadPopupListenerMessageName,
-        shouldLoadPopupListenerAsync
+        shouldLoadPopupListener
     );
 
     var shouldLoadListenerMessageName = location.host + ':shouldLoad';
@@ -2484,7 +2411,7 @@ vAPI.net.registerListeners = function() {
     cleanupTasks.push(function() {
         vAPI.messaging.globalMessageManager.removeMessageListener(
             shouldLoadPopupListenerMessageName,
-            shouldLoadPopupListenerAsync
+            shouldLoadPopupListener
         );
 
         vAPI.messaging.globalMessageManager.removeMessageListener(
@@ -2562,7 +2489,7 @@ vAPI.toolbarButton = {
         var win = winWatcher.getCurrentWindow();
         var curTabId = tabWatcher.tabIdFromTarget(getTabBrowser(win).selectedTab);
         vAPI.tabs.open({
-            url: 'popup.html?tabId=' + curTabId,
+            url: 'popup.html?tabId=' + curTabId + '&mobile=1',
             index: -1,
             select: true
         });
@@ -3092,6 +3019,9 @@ vAPI.toolbarButton = {
 
         CustomizableUI.addListener(CUIEvents);
 
+        // https://github.com/gorhill/uBlock/issues/2696
+        // https://github.com/gorhill/uBlock/issues/2709
+
         var style = [
             '#' + this.id + '.off {',
                 'list-style-image: url(',
@@ -3105,9 +3035,12 @@ vAPI.toolbarButton = {
             '}',
             '#' + this.viewId + ',',
             '#' + this.viewId + ' > iframe {',
-                'width: 160px;',
                 'height: 290px;',
+                'max-width: none !important;',
+                'min-width: 0 !important;',
                 'overflow: hidden !important;',
+                'padding: 0 !important;',
+                'width: 160px;',
             '}'
         ];
 
@@ -3326,7 +3259,8 @@ vAPI.contextMenu = (function() {
         }
         deferUntil(
             canRegister.bind(null, win),
-            register.bind(null, win)
+            register.bind(null, win),
+            { first: 4000 }
         );
     };
 
@@ -3358,6 +3292,111 @@ vAPI.contextMenu = (function() {
         register: registerAsync,
         unregister: unregister,
         setEntries: setEntries
+    };
+})();
+
+/******************************************************************************/
+/******************************************************************************/
+
+// Keyboard shortcuts have to be hardcoded, as they are declaratively created
+// in the manifest.json file on webext API, and only a listener has to be
+// installed with the browser.commands API.
+//
+// Assuming only one client listener is installed.
+
+// Shortcuts can be customized in `about:config` using
+//     extensions.ublock0.shortcuts.[command id]    => modifier-key
+// To disable a shortcut, set it to `-`:
+//     extensions.ublock0.shortcuts.[command id]    => -
+
+vAPI.commands = (function() {
+    if ( vAPI.fennec || vAPI.thunderbird ) { return; }
+
+    var commands = [
+        { id: 'launch-element-zapper' },
+        { id: 'launch-element-picker' },
+        { id: 'launch-logger' }
+    ];
+    var clientListener;
+
+    var commandHandler = function(ev) {
+        if ( typeof clientListener !== 'function' ) { return; }
+        var match = /^uBlock0Key-([a-z-]+)$/.exec(ev.target.id);
+        if ( match === null ) { return; }
+        clientListener(match[1]);
+    };
+
+    var canRegister = function(win) {
+        return win && win.document.readyState === 'complete';
+    };
+
+    var register = function(window) {
+        if ( canRegister(window) !== true ) { return; }
+
+        var doc = window.document,
+            myKeyset = doc.getElementById('uBlock0Keyset');
+        // Already registered?
+        if ( myKeyset !== null ) { return; }
+
+        var mainKeyset = doc.getElementById('mainKeyset'),
+            keysetHolder = mainKeyset && mainKeyset.parentNode;
+        if ( keysetHolder === null ) { return; }
+
+        myKeyset = doc.createElement('keyset');
+        myKeyset.setAttribute('id', 'uBlock0Keyset');
+
+        var myKey, shortcut, parts, modifiers, key;
+        for ( var command of commands ) {
+            modifiers = key = '';
+            shortcut = vAPI.localStorage.getItem('shortcuts.' + command.id);
+            if ( shortcut === null ) {
+                vAPI.localStorage.setItem('shortcuts.' + command.id, '');
+            } else if ( (parts = /^((?:[a-z]+-){1,})?(\w)$/.exec(shortcut)) !== null ) {
+                modifiers = (parts[1] || '').slice(0, -1).replace(/-/g, ',');
+                key = parts[2] || '';
+            }
+            myKey = doc.createElement('key');
+            myKey.setAttribute('id', 'uBlock0Key-' + command.id);
+            if ( modifiers !== '' ) {
+                myKey.setAttribute('modifiers', modifiers);
+            }
+            myKey.setAttribute('key', key);
+            // https://stackoverflow.com/a/16786770
+            myKey.setAttribute('oncommand', ';');
+            myKeyset.appendChild(myKey);
+        }
+
+        keysetHolder.addEventListener('command', commandHandler);
+        keysetHolder.appendChild(myKeyset);
+    };
+
+    var registerAsync = function(win) {
+        if ( vAPI.fennec ) { return; }
+        deferUntil(
+            canRegister.bind(null, win),
+            register.bind(null, win),
+            { first: 4000 }
+        );
+    };
+
+    var unregister = function(window) {
+        var doc = window.document,
+            myKeyset = doc.getElementById('uBlock0Keyset');
+        if ( myKeyset === null ) { return; }
+        myKeyset.removeEventListener('command', commandHandler);
+        myKeyset.parentNode.removeChild(myKeyset);
+    };
+
+    var addListener = function(callback) {
+        clientListener = callback;
+    };
+
+    return {
+        register: registerAsync,
+        unregister: unregister,
+        onCommand: {
+            addListener: addListener
+        }
     };
 })();
 
@@ -3434,7 +3473,7 @@ var optionsObserver = (function() {
     var register = function() {
         Services.obs.addObserver(observer, 'addon-options-displayed', false);
         cleanupTasks.push(unregister);
-        deferUntil(canInit, init, { next: 463 });
+        deferUntil(canInit, init, { first: 4000 });
     };
 
     return {

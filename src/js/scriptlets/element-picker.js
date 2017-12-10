@@ -1,7 +1,7 @@
 /*******************************************************************************
 
     uBlock Origin - a browser extension to block requests.
-    Copyright (C) 2014-2016 Raymond Hill
+    Copyright (C) 2014-2017 Raymond Hill
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -118,12 +118,11 @@
 
 /******************************************************************************/
 
-if ( typeof vAPI !== 'object' ) {
-    return;
-}
-
-// don't run in frames
-if ( window.top !== window ) {
+if (
+    window.top !== window ||
+    typeof vAPI !== 'object' ||
+    vAPI.domFilterer instanceof Object === false
+) {
     return;
 }
 
@@ -131,8 +130,8 @@ var pickerRoot = document.getElementById(vAPI.sessionId);
 if ( pickerRoot ) {
     return;
 }
+
 var pickerBody = null;
-var pickerStyle = null;
 var svgOcean = null;
 var svgIslands = null;
 var svgRoot = null;
@@ -173,6 +172,14 @@ var safeQuerySelectorAll = function(node, selector) {
         }
     }
     return [];
+};
+
+/******************************************************************************/
+
+var rawFilterFromTextarea = function() {
+    var s = taCandidate.value,
+        pos = s.indexOf('\n');
+    return pos === -1 ? s.trim() : s.slice(0, pos).trim();
 };
 
 /******************************************************************************/
@@ -481,13 +488,11 @@ var cosmeticFilterFromElement = function(elem) {
     }
 
     // Class(es)
-    if ( selector === '' ) {
-        v = elem.classList;
-        if ( v ) {
-            i = v.length || 0;
-            while ( i-- ) {
-                selector += '.' + CSS.escape(v.item(i));
-            }
+    v = elem.classList;
+    if ( v ) {
+        i = v.length || 0;
+        while ( i-- ) {
+            selector += '.' + CSS.escape(v.item(i));
         }
     }
 
@@ -635,7 +640,9 @@ var filtersFrom = function(x, y) {
     filterToDOMInterface.set
     @desc   Look-up all the HTML elements matching the filter passed in
             argument.
-    @param  string, a cosmetic of network filter.
+    @param  string, a cosmetic or network filter.
+    @param  function, called once all items matching the filter have been
+            collected.
     @return array, or undefined if the filter is invalid.
 
     filterToDOMInterface.preview
@@ -733,16 +740,15 @@ var filterToDOMInterface = (function() {
     // ways to compose a valid href to the same effective URL. One idea is to
     // normalize all a[href] on the page, but for now I will wait and see, as I
     // prefer to refrain from tampering with the page content if I can avoid it.
-    var fromCosmeticFilter = function(filter) {
+    var fromPlainCosmeticFilter = function(filter) {
         var elems;
         try {
             elems = document.querySelectorAll(filter);
         }
         catch (e) {
-            return fromProceduralCosmeticFilter(filter);
+            return;
         }
-        var out = [],
-            iElem = elems.length;
+        var out = [], iElem = elems.length;
         while ( iElem-- ) {
             out.push({ type: 'cosmetic', elem: elems[iElem]});
         }
@@ -751,108 +757,27 @@ var filterToDOMInterface = (function() {
 
     // https://github.com/gorhill/uBlock/issues/1772
     // Handle procedural cosmetic filters.
-    var fromProceduralCosmeticFilter = function(filter) {
-        if ( filter.charCodeAt(filter.length - 1) === 0x29 /* ')' */ ) {
-            var parts = reProceduralCosmeticFilter.exec(filter);
-            if (
-                parts !== null &&
-                proceduralCosmeticFilterFunctions.hasOwnProperty(parts[2])
-            ) {
-                return proceduralCosmeticFilterFunctions[parts[2]](
-                    parts[1].trim(),
-                    parts[3].trim()
-                );
-            }
+    var fromCompiledCosmeticFilter = function(raw) {
+        if ( typeof raw !== 'string' ) { return; }
+        var o;
+        try {
+            o = JSON.parse(raw);
+        } catch(ex) {
+            return;
         }
-    };
-
-    var reProceduralCosmeticFilter = /^(.*?):(matches-css|has|style|xpath)\((.+?)\)$/;
-
-    // Collection of handlers for procedural cosmetic filters.
-    var proceduralCosmeticFilterFunctions = {
-        'has': function(selector, arg) {
-            if ( selector === '' ) { return; }
-            var elems;
-            try {
-                elems = document.querySelectorAll(selector);
-                document.querySelector(arg);
-            } catch(ex) {
-                return;
-            }
-            var out = [], elem;
-            for ( var i = 0, n = elems.length; i < n; i++ ) {
-                elem = elems[i];
-                if ( elem.querySelector(arg) ) {
-                    out.push({ type: 'cosmetic', elem: elem });
-                }
-            }
-            return out;
-        },
-        'matches-css': function(selector, arg) {
-            if ( selector === '' ) { return; }
-            var elems;
-            try {
-                elems = document.querySelectorAll(selector);
-            } catch(ex) {
-                return;
-            }
-            var out = [], elem, style,
-                pos = arg.indexOf(':');
-            if ( pos === -1 ) { return; }
-            var prop = arg.slice(0, pos).trim(),
-                reText = arg.slice(pos + 1).trim();
-            if ( reText === '' ) { return; }
-            var re = reText !== '*' ?
-                new RegExp('^' + reText.replace(/[.+?${}()|[\]\\^]/g, '\\$&').replace(/\*+/g, '.*?') + '$') :
-                /./;
-            for ( var i = 0, n = elems.length; i < n; i++ ) {
-                elem = elems[i];
-                style = window.getComputedStyle(elem, null);
-                if ( re.test(style[prop]) ) {
-                    out.push({ type: 'cosmetic', elem: elem });
-                }
-            }
-            return out;
-        },
-        'style': function(selector, arg) {
-            if ( selector === '' || arg === '' ) { return; }
-            var elems;
-            try {
-                elems = document.querySelectorAll(selector);
-            } catch(ex) {
-                return;
-            }
-            var out = [];
-            for ( var i = 0, n = elems.length; i < n; i++ ) {
-                out.push({ type: 'cosmetic', elem: elems[i] });
-            }
-            lastAction = selector + ' { ' + arg + ' }';
-            return out;
-        },
-        'xpath': function(selector, arg) {
-            if ( selector !== '' ) { return []; }
-            var result;
-            try {
-                result = document.evaluate(
-                    arg,
-                    document,
-                    null,
-                    XPathResult.UNORDERED_NODE_SNAPSHOT_TYPE,
-                    null
-                );
-            } catch(ex) {
-                return;
-            }
-            if ( result === undefined ) { return []; }
-            var out = [], elem, i = result.snapshotLength;
-            while ( i-- ) {
-                elem = result.snapshotItem(i);
-                if ( elem.nodeType === 1 ) {
-                    out.push({ type: 'cosmetic', elem: elem });
-                }
-            }
-            return out;
+        var elems;
+        if ( o.style ) {
+            elems = document.querySelectorAll(o.style[0]);
+            lastAction = o.style[0] + ' {' + o.style[1] + '}';
+        } else if ( o.tasks ) {
+            elems = vAPI.domFilterer.createProceduralFilter(o).exec();
         }
+        if ( !elems ) { return; }
+        var out = [];
+        for ( var i = 0, n = elems.length; i < n; i++ ) {
+            out.push({ type: 'cosmetic', elem: elems[i] });
+        }
+        return out;
     };
 
     var lastFilter,
@@ -862,26 +787,44 @@ var filterToDOMInterface = (function() {
         applied = false,
         previewing = false;
 
-    var queryAll = function(filter) {
+    var queryAll = function(filter, callback) {
         filter = filter.trim();
         if ( filter === lastFilter ) {
-            return lastResultset;
+            callback(lastResultset);
+            return;
         }
         unapply();
         if ( filter === '' ) {
             lastFilter = '';
             lastResultset = [];
-        } else {
-            lastFilter = filter;
-            lastAction = undefined;
-            lastResultset = filter.lastIndexOf('##', 0) === 0 ?
-                fromCosmeticFilter(filter.slice(2)) :
-                fromNetworkFilter(filter);
-            if ( previewing ) {
-                apply(filter);
-            }
+            callback(lastResultset);
+            return;
         }
-        return lastResultset;
+        lastFilter = filter;
+        lastAction = undefined;
+        if ( filter.lastIndexOf('##', 0) === -1 ) {
+            lastResultset = fromNetworkFilter(filter);
+            if ( previewing ) { apply(); }
+            callback(lastResultset);
+            return;
+        }
+        var selector = filter.slice(2);
+        lastResultset = fromPlainCosmeticFilter(selector);
+        if ( lastResultset ) {
+            if ( previewing ) { apply(); }
+            callback(lastResultset);
+            return;
+        }
+        // Procedural cosmetic filter
+        vAPI.messaging.send(
+            'elementPicker',
+            { what: 'compileCosmeticFilterSelector', selector: selector },
+            function(response) {
+                lastResultset = fromCompiledCosmeticFilter(response);
+                if ( previewing ) { apply(); }
+                callback(lastResultset);
+            }
+        );
     };
 
     var applyHide = function() {
@@ -983,9 +926,11 @@ var filterToDOMInterface = (function() {
     var preview = function(filter) {
         previewing = filter !== false;
         if ( previewing ) {
-            if ( queryAll(filter) !== undefined ) {
-                apply();
-            }
+            queryAll(filter, function(items) {
+                if ( items !== undefined ) {
+                    apply();
+                }
+            });
         } else {
             unapply();
         }
@@ -999,67 +944,72 @@ var filterToDOMInterface = (function() {
     };
 })();
 
-// https://www.youtube.com/watch?v=nuUXJ6RfIik
-
 /******************************************************************************/
 
-var userFilterFromCandidate = function() {
-    var v = taCandidate.value;
-    var items = filterToDOMInterface.set(v);
-    if ( !items || items.length === 0 ) {
-        return false;
-    }
-
-    // https://github.com/gorhill/uBlock/issues/738
-    // Trim dots.
-    var hostname = window.location.hostname;
-    if ( hostname.slice(-1) === '.' ) {
-        hostname = hostname.slice(0, -1);
-    }
-
-    // Cosmetic filter?
-    if ( v.lastIndexOf('##', 0) === 0 ) {
-        return hostname + v;
-    }
-
-    // Assume net filter
-    var opts = [];
-
-    // If no domain included in filter, we need domain option
-    if ( v.lastIndexOf('||', 0) === -1 ) {
-        opts.push('domain=' + hostname);
-    }
-
-    var item = items[0];
-    if ( item.opts ) {
-        opts.push(item.opts);
-    }
-
-    if ( opts.length ) {
-        v += '$' + opts.join(',');
-    }
-
-    return v;
-};
-
-/******************************************************************************/
-
-var onCandidateChanged = function() {
-    var elems = [],
-        items = filterToDOMInterface.set(taCandidate.value),
-        valid = items !== undefined;
-    if ( valid ) {
-        for ( var i = 0; i < items.length; i++ ) {
-            elems.push(items[i].elem);
+var userFilterFromCandidate = function(callback) {
+    var v = rawFilterFromTextarea();
+    filterToDOMInterface.set(v, function(items) {
+        if ( !items || items.length === 0 ) {
+            callback();
+            return;
         }
-    }
-    pickerBody.querySelector('body section textarea + div').textContent = valid ?
-        items.length.toLocaleString() :
-        '0';
-    taCandidate.classList.toggle('invalidFilter', !valid);
-    dialog.querySelector('#create').disabled = elems.length === 0;
-    highlightElements(elems, true);
+
+        // https://github.com/gorhill/uBlock/issues/738
+        // Trim dots.
+        var hostname = window.location.hostname;
+        if ( hostname.slice(-1) === '.' ) {
+            hostname = hostname.slice(0, -1);
+        }
+
+        // Cosmetic filter?
+        if ( v.lastIndexOf('##', 0) === 0 ) {
+            callback(hostname + v);
+            return;
+        }
+
+        // Assume net filter
+        var opts = [];
+
+        // If no domain included in filter, we need domain option
+        if ( v.lastIndexOf('||', 0) === -1 ) {
+            opts.push('domain=' + hostname);
+        }
+
+        var item = items[0];
+        if ( item.opts ) {
+            opts.push(item.opts);
+        }
+
+        if ( opts.length ) {
+            v += '$' + opts.join(',');
+        }
+
+        callback(v);
+    });
 };
+
+/******************************************************************************/
+
+var onCandidateChanged = (function() {
+    var process = function(items) {
+        var elems = [], valid = items !== undefined;
+        if ( valid ) {
+            for ( var i = 0; i < items.length; i++ ) {
+                elems.push(items[i].elem);
+            }
+        }
+        pickerBody.querySelector('#resultsetCount').textContent = valid ?
+            items.length.toLocaleString() :
+            'E';
+        dialog.querySelector('section').classList.toggle('invalidFilter', !valid);
+        dialog.querySelector('#create').disabled = elems.length === 0;
+        highlightElements(elems, true);
+    };
+
+    return function() {
+        filterToDOMInterface.set(rawFilterFromTextarea(), process);
+    };
+})();
 
 /******************************************************************************/
 
@@ -1083,13 +1033,22 @@ var candidateFromFilterChoice = function(filterChoice) {
     // - Do not compute exact path.
     // - Discard narrowing directives.
     if ( filterChoice.modifier ) {
-        return filter.replace(/:nth-of-type\(\d+\)/, '');
+        filter = filter.replace(/:nth-of-type\(\d+\)/, '');
+        // Remove the id if one or more classes exist.
+        if ( filter.charAt(2) === '#' && filter.indexOf('.') !== -1 ) {
+            filter = filter.replace(/#[^#.]+/, '');
+        }
+        return filter;
     }
 
     // Return path: the target element, then all siblings prepended
     var selector = '', joiner = '';
     for ( ; slot < filters.length; slot++ ) {
         filter = filters[slot];
+        // Remove all classes when an id exists.
+        if ( filter.charAt(2) === '#' ) {
+            filter = filter.replace(/\..+$/, '');
+        }
         selector = filter.slice(2) + joiner + selector;
         // Stop at any element with an id: these are unique in a web page
         if ( filter.lastIndexOf('###', 0) === 0 ) {
@@ -1101,6 +1060,15 @@ var candidateFromFilterChoice = function(filterChoice) {
         }
         joiner = ' > ';
     }
+
+    // https://github.com/gorhill/uBlock/issues/2519
+    if (
+        slot === filters.length &&
+        document.querySelectorAll(selector).length > 1
+    ) {
+        selector = 'body > ' + selector;
+    }
+
     return '##' + selector;
 };
 
@@ -1124,7 +1092,15 @@ var filterChoiceFromEvent = function(ev) {
 /******************************************************************************/
 
 var onDialogClicked = function(ev) {
-    if ( ev.target === null ) {
+    if ( ev.isTrusted === false ) { return; }
+
+    // If the dialog is hidden, clicking on it force it to become visible.
+    if ( dialog.classList.contains('hide') ) {
+        dialog.classList.add('show');
+        dialog.classList.remove('hide');
+    }
+
+    else if ( ev.target === null ) {
         /* do nothing */
     }
 
@@ -1132,8 +1108,8 @@ var onDialogClicked = function(ev) {
         // We have to exit from preview mode: this guarantees matching elements
         // will be found for the candidate filter.
         filterToDOMInterface.preview(false);
-        var filter = userFilterFromCandidate();
-        if ( filter ) {
+        userFilterFromCandidate(function(filter) {
+            if ( !filter ) { return; }
             var d = new Date();
             vAPI.messaging.send(
                 'elementPicker',
@@ -1143,9 +1119,9 @@ var onDialogClicked = function(ev) {
                     pageDomain: window.location.hostname
                 }
             );
-            filterToDOMInterface.preview(taCandidate.value);
+            filterToDOMInterface.preview(rawFilterFromTextarea());
             stopPicker();
-        }
+        });
     }
 
     else if ( ev.target.id === 'pick' ) {
@@ -1161,7 +1137,7 @@ var onDialogClicked = function(ev) {
         if ( filterToDOMInterface.previewing() ) {
             filterToDOMInterface.preview(false);
         } else {
-            filterToDOMInterface.preview(taCandidate.value);
+            filterToDOMInterface.preview(rawFilterFromTextarea());
         }
         highlightElements(targetElements, true);
     }
@@ -1193,6 +1169,11 @@ var showDialog = function(options) {
 
     options = options || {};
 
+    // Typically the dialog will be forced to be visible when using a
+    // touch-aware device.
+    dialog.classList.toggle('show', options.show === true);
+    dialog.classList.remove('hide');
+
     // Create lists of candidate filters
     var populate = function(src, des) {
         var root = dialog.querySelector(des);
@@ -1210,7 +1191,10 @@ var showDialog = function(options) {
     populate(netFilterCandidates, '#netFilters');
     populate(cosmeticFilterCandidates, '#cosmeticFilters');
 
-    dialog.querySelector('ul').style.display = netFilterCandidates.length || cosmeticFilterCandidates.length ? '' : 'none';
+    dialog.querySelector('ul').style.display =
+        netFilterCandidates.length || cosmeticFilterCandidates.length
+            ? ''
+            : 'none';
     dialog.querySelector('#create').disabled = true;
 
     // Auto-select a candidate filter
@@ -1232,18 +1216,43 @@ var showDialog = function(options) {
 
 /******************************************************************************/
 
-var elementFromPoint = function(x, y) {
-    if ( !pickerRoot ) {
-        return null;
+var zap = function() {
+    if ( targetElements.length === 0 ) { return; }
+    var elem = targetElements[0],
+        style = window.getComputedStyle(elem);
+    // Heuristic to detect scroll-locking: remove such lock when detected.
+    if ( parseInt(style.zIndex, 10) >= 1000 || style.position === 'fixed' ) {
+        document.body.style.setProperty('overflow', 'auto', 'important');
+        document.documentElement.style.setProperty('overflow', 'auto', 'important');
     }
-    pickerRoot.style.pointerEvents = 'none';
-    var elem = document.elementFromPoint(x, y);
-    if ( elem === document.body || elem === document.documentElement ) {
-        elem = null;
-    }
-    pickerRoot.style.pointerEvents = '';
-    return elem;
+    elem.parentNode.removeChild(elem);
+    elem = elementFromPoint();
+    highlightElements(elem ? [elem] : []);
 };
+
+/******************************************************************************/
+
+var elementFromPoint = (function() {
+    var lastX, lastY;
+
+    return function(x, y) {
+        if ( x !== undefined ) {
+            lastX = x; lastY = y;
+        } else if ( lastX !== undefined ) {
+            x = lastX; y = lastY;
+        } else {
+            return null;
+        }
+        if ( !pickerRoot ) { return null; }
+        pickerRoot.style.pointerEvents = 'none';
+        var elem = document.elementFromPoint(x, y);
+        if ( elem === document.body || elem === document.documentElement ) {
+            elem = null;
+        }
+        pickerRoot.style.pointerEvents = '';
+        return elem;
+    };
+})();
 
 /******************************************************************************/
 
@@ -1257,20 +1266,107 @@ var onSvgHovered = (function() {
         highlightElements(elem ? [elem] : []);
     };
 
-    var onMove = function(ev) {
+    return function onMove(ev) {
         mx = ev.clientX;
         my = ev.clientY;
         if ( timer === null ) {
             timer = vAPI.setTimeout(onTimer, 40);
         }
     };
+})();
 
-    return onMove;
+/*******************************************************************************
+
+    Swipe right:
+        If picker not paused: quit picker
+        If picker paused and dialog visible: hide dialog
+        If picker paused and dialog not visible: quit picker
+
+    Swipe left:
+        If picker paused and dialog not visible: show dialog
+
+*/
+
+var onSvgTouchStartStop = (function() {
+    var startX,
+        startY;
+    return function onTouch(ev) {
+        if ( ev.type === 'touchstart' ) {
+            startX = ev.touches[0].screenX;
+            startY = ev.touches[0].screenY;
+            return;
+        }
+        if ( startX === undefined ) { return; }
+        if ( ev.cancelable === false ) { return; }
+        var stopX = ev.changedTouches[0].screenX,
+            stopY = ev.changedTouches[0].screenY,
+            angle = Math.abs(Math.atan2(stopY - startY, stopX - startX)),
+            distance = Math.sqrt(
+                Math.pow(stopX - startX, 2),
+                Math.pow(stopY - startY, 2)
+            );
+        // Interpret touch events as a click events if swipe is not valid.
+        if ( distance < 32 ) {
+            onSvgClicked({
+                type: 'touch',
+                target: ev.target,
+                clientX: ev.changedTouches[0].pageX,
+                clientY: ev.changedTouches[0].pageY,
+                isTrusted: ev.isTrusted
+            });
+            ev.preventDefault();
+            return;
+        }
+        if ( distance < 64 ) { return; }
+        var angleUpperBound = Math.PI * 0.25 * 0.5,
+            swipeRight = angle < angleUpperBound;
+        if ( swipeRight === false && angle < Math.PI - angleUpperBound ) {
+            return;
+        }
+        ev.preventDefault();
+        // Swipe left.
+        if ( swipeRight === false ) {
+            if ( pickerBody.classList.contains('paused') ) {
+                dialog.classList.remove('hide');
+                dialog.classList.add('show');
+            }
+            return;
+        }
+        // Swipe right.
+        if (
+            pickerBody.classList.contains('paused') &&
+            dialog.classList.contains('show')
+        ) {
+            dialog.classList.remove('show');
+            dialog.classList.add('hide');
+            return;
+        }
+        stopPicker();
+    };
 })();
 
 /******************************************************************************/
 
 var onSvgClicked = function(ev) {
+    if ( ev.isTrusted === false ) { return; }
+
+    // If zap mode, highlight element under mouse, this makes the zapper usable
+    // on touch screens.
+    if ( pickerBody.classList.contains('zap') ) {
+        var elem = targetElements.lenght !== 0 && targetElements[0];
+        if ( !elem || ev.target !== svgIslands ) {
+            elem = elementFromPoint(ev.clientX, ev.clientY);
+            if ( elem !== null ) {
+                highlightElements([elem]);
+                return;
+            }
+        }
+        zap();
+        if ( !ev.shiftKey ) {
+            stopPicker();
+        }
+        return;
+    }
     // https://github.com/chrisaljoudi/uBlock/issues/810#issuecomment-74600694
     // Unpause picker if:
     // - click outside dialog AND
@@ -1284,23 +1380,33 @@ var onSvgClicked = function(ev) {
     if ( filtersFrom(ev.clientX, ev.clientY) === 0 ) {
         return;
     }
-    showDialog();
+    showDialog({ show: ev.type === 'touch' });
 };
 
 /******************************************************************************/
 
 var svgListening = function(on) {
     var action = (on ? 'add' : 'remove') + 'EventListener';
-    svgRoot[action]('mousemove', onSvgHovered);
+    svgRoot[action]('mousemove', onSvgHovered, { passive: true });
 };
 
 /******************************************************************************/
 
 var onKeyPressed = function(ev) {
-    if ( ev.which === 27 ) {
+    // Delete
+    if ( ev.key === 'Delete' && pickerBody.classList.contains('zap') ) {
         ev.stopPropagation();
         ev.preventDefault();
+        zap();
+        return;
+    }
+    // Esc
+    if ( ev.key === 'Escape' || ev.which === 27 ) {
+        ev.stopPropagation();
+        ev.preventDefault();
+        filterToDOMInterface.preview(false);
         stopPicker();
+        return;
     }
 };
 
@@ -1341,14 +1447,15 @@ var stopPicker = function() {
     candidateElements = [];
     bestCandidateFilter = null;
 
-    if ( pickerRoot === null ) {
-        return;
-    }
+    if ( pickerRoot === null ) { return; }
 
     // https://github.com/gorhill/uBlock/issues/2060
-    if ( vAPI.userCSS ) {
-        vAPI.userCSS.remove(pickerStyle.textContent);
+    if ( vAPI.domFilterer instanceof Object ) {
+        vAPI.userStylesheet.remove(pickerCSS1);
+        vAPI.userStylesheet.remove(pickerCSS2);
+        vAPI.userStylesheet.apply();
     }
+    vAPI.domFilterer.unexcludeNode(pickerRoot);
 
     window.removeEventListener('scroll', onScrolled, true);
     pickerRoot.contentWindow.removeEventListener('keydown', onKeyPressed, true);
@@ -1356,9 +1463,10 @@ var stopPicker = function() {
     dialog.removeEventListener('click', onDialogClicked);
     svgListening(false);
     svgRoot.removeEventListener('click', onSvgClicked);
-    pickerStyle.parentNode.removeChild(pickerStyle);
+    svgRoot.removeEventListener('touchstart', onSvgTouchStartStop);
+    svgRoot.removeEventListener('touchend', onSvgTouchStartStop);
     pickerRoot.parentNode.removeChild(pickerRoot);
-    pickerRoot.onload = null;
+    pickerRoot.removeEventListener('load', stopPicker);
     pickerRoot =
     pickerBody =
     dialog =
@@ -1371,7 +1479,7 @@ var stopPicker = function() {
 /******************************************************************************/
 
 var startPicker = function(details) {
-    pickerRoot.onload = stopPicker;
+    pickerRoot.addEventListener('load', stopPicker);
 
     var frameDoc = pickerRoot.contentDocument;
     var parsedDom = (new DOMParser()).parseFromString(
@@ -1390,6 +1498,7 @@ var startPicker = function(details) {
 
     pickerBody = frameDoc.body;
     pickerBody.setAttribute('lang', navigator.language);
+    pickerBody.classList.toggle('zap', details.zap === true);
 
     dialog = pickerBody.querySelector('aside');
     dialog.addEventListener('click', onDialogClicked);
@@ -1401,6 +1510,8 @@ var startPicker = function(details) {
     svgOcean = svgRoot.firstChild;
     svgIslands = svgRoot.lastChild;
     svgRoot.addEventListener('click', onSvgClicked);
+    svgRoot.addEventListener('touchstart', onSvgTouchStartStop);
+    svgRoot.addEventListener('touchend', onSvgTouchStartStop);
     svgListening(true);
 
     window.addEventListener('scroll', onScrolled, true);
@@ -1473,9 +1584,22 @@ var startPicker = function(details) {
 
 /******************************************************************************/
 
+var bootstrapPicker = function() {
+    pickerRoot.removeEventListener('load', bootstrapPicker);
+    vAPI.shutdown.add(stopPicker);
+    vAPI.messaging.send(
+        'elementPicker',
+        { what: 'elementPickerArguments' },
+        startPicker
+    );
+};
+
+/******************************************************************************/
+
 pickerRoot = document.createElement('iframe');
 pickerRoot.id = vAPI.sessionId;
-pickerRoot.style.cssText = [
+
+var pickerCSSStyle = [
     'background: transparent',
     'border: 0',
     'border-radius: 0',
@@ -1485,6 +1609,7 @@ pickerRoot.style.cssText = [
     'left: 0',
     'margin: 0',
     'max-height: none',
+    'max-width: none',
     'opacity: 1',
     'outline: 0',
     'padding: 0',
@@ -1495,42 +1620,31 @@ pickerRoot.style.cssText = [
     'z-index: 2147483647',
     ''
 ].join(' !important;');
+pickerRoot.style.cssText = pickerCSSStyle;
 
-// https://github.com/gorhill/uBlock/issues/1529
-// In addition to inline styles, harden the element picker styles by using
-// a dedicated style tag.
-pickerStyle = document.createElement('style');
-pickerStyle.textContent = [
+var pickerCSS1 = [
     '#' + pickerRoot.id + ' {',
-        pickerRoot.style.cssText,
-    '}',
+        pickerCSSStyle,
+    '}'
+].join('\n');
+var pickerCSS2 = [
     '[' + pickerRoot.id + '-clickblind] {',
         'pointer-events: none !important;',
-    '}',
-    ''
+    '}'
 ].join('\n');
-document.documentElement.appendChild(pickerStyle);
+
+// https://github.com/gorhill/uBlock/issues/1529
+//   In addition to inline styles, harden the element picker styles by using
+//   dedicated CSS rules.
+vAPI.userStylesheet.add(pickerCSS1);
+vAPI.userStylesheet.add(pickerCSS2);
+vAPI.userStylesheet.apply();
 
 // https://github.com/gorhill/uBlock/issues/2060
-if ( vAPI.domFilterer ) {
-    pickerRoot[vAPI.domFilterer.getExcludeId()] = true;
-}
-if ( vAPI.userCSS ) {
-    vAPI.userCSS.add(pickerStyle.textContent);
-}
+vAPI.domFilterer.excludeNode(pickerRoot);
 
-pickerRoot.onload = function() {
-    vAPI.shutdown.add(stopPicker);
-    vAPI.messaging.send(
-        'elementPicker',
-        { what: 'elementPickerArguments' },
-        startPicker
-    );
-};
-
+pickerRoot.addEventListener('load', bootstrapPicker);
 document.documentElement.appendChild(pickerRoot);
-
-// https://www.youtube.com/watch?v=sociXdKnyr8
 
 /******************************************************************************/
 
